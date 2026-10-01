@@ -1,67 +1,35 @@
-# LTC Editor — Football Manager 2011
+# LTC Editor — Football Manager 2011 · Mobile Optimized
 
-Editor `.ltc` berbasis browser untuk file language Football Manager 2011.
+Editor `.ltc` berbasis browser yang dioptimalkan untuk Android/HP dan file FM2011 sekitar 21,7 MB.
 
-## Fitur
+## Optimasi utama
 
-- Buka file `.ltc` langsung dari perangkat.
-- Pemrosesan file dilakukan lokal di browser; file tidak di-upload ke server.
-- Mendeteksi record `0x01 + uint32 little-endian length + UTF-8 text`.
-- Pencarian string cepat.
-- Filter huruf besar/kecil.
-- Filter string yang memiliki placeholder `[%...]`.
-- Editor string.
-- Peringatan jika placeholder hilang/bertambah.
-- Mendukung perubahan panjang teks dengan memperbarui field length record.
-- Undo praktis melalui "Batalkan perubahan" untuk kembali ke file asli.
-- Download hasil sebagai `*_edited.ltc`.
-- PWA dan siap Cloudflare Pages.
+- Tidak menyimpan 178 ribu teks string sebagai objek JavaScript.
+- Saat file dibuka, aplikasi membuat **indeks ringan** berisi offset + panjang byte.
+- Kalimat asli baru di-decode ketika diperlukan.
+- Pencarian memakai debounce dan hanya merender maksimal 120 hasil.
+- Daftar hasil menampilkan **kalimat lengkap**, bukan potongan/ellipsis.
+- Saat string dipilih, teks lengkap dengan placeholder seperti `[%club#1-short]` dapat diedit langsung.
+- Perubahan hanya disimpan di string yang benar-benar diedit.
+- Jika tidak ada perubahan, file asli di-download tanpa rebuild.
+- Export memperbarui length record hanya untuk string yang diubah.
+- Placeholder yang hilang/bertambah diberi peringatan.
+- Semua pemrosesan tetap lokal di perangkat.
 
-## Penting
+## Struktur LTC yang digunakan
 
-Format `.ltc` bersifat proprietary. Parser ini dibuat berdasarkan struktur file FM2011 `english.ltc` yang dianalisis untuk project ini. Selalu simpan backup file asli dan uji hasil export di game sebelum mengganti file utama.
+Berdasarkan file FM2011 yang diuji:
 
-Parser sengaja mempertahankan byte di luar record string yang dikenali. Jika sebuah file memiliki varian struktur berbeda, aplikasi dapat melewatkan sebagian record.
+`0x01 + uint32 little-endian byteLength + UTF-8 text`
 
-## Jalankan lokal
+Byte di luar record yang dikenali dipertahankan.
 
-Tidak perlu build system:
+## Deployment
 
-```bash
-python3 -m http.server 8080
-```
+Static site, tanpa build command. Bisa di-host di GitHub Pages atau Cloudflare Pages.
 
-Buka:
+Untuk Cloudflare Pages: framework **None**, build command kosong, output directory `/`.
 
-`http://localhost:8080`
+## Catatan
 
-Atau deploy langsung folder ini ke Cloudflare Pages.
-
-## GitHub + Cloudflare Pages
-
-```bash
-git init
-git add .
-git commit -m "Initial LTC Editor"
-git branch -M main
-git remote add origin https://github.com/USERNAME/REPO.git
-git push -u origin main
-```
-
-Di Cloudflare Pages:
-1. Create application / Pages.
-2. Connect to Git.
-3. Pilih repository.
-4. Framework preset: None.
-5. Build command: kosong.
-6. Build output directory: `/`.
-7. Deploy.
-
-Setiap `git push` berikutnya dapat memicu deployment baru jika Git integration diaktifkan.
-
-## Batasan saat ini
-
-- Tidak mengubah game database, hanya language `.ltc`.
-- Tidak mencoba menebak arti placeholder.
-- ID yang ditampilkan adalah indeks record + offset byte, bukan klaim sebagai ID internal resmi game.
-- Untuk keamanan, backup file asli sebelum pengujian.
+Format `.ltc` bersifat proprietary. Parser ini dibuat berdasarkan struktur file FM2011 yang dianalisis. Selalu backup file asli dan uji hasil export di game.

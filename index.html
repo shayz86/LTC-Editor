@@ -29,19 +29,20 @@
       <button id="revertBtn" disabled>↩ Batalkan perubahan</button>
     </div>
     <div id="fileInfo" class="fileinfo">Belum ada file. Semua pemrosesan dilakukan lokal di browser.</div>
+    <div id="progressWrap" class="progress-wrap hidden"><div class="progress-track"><div id="progressBar" class="progress-bar"></div></div><div id="progressText" class="progress-text">Menganalisis file…</div></div>
   </section>
 
   <section class="workspace">
     <aside class="sidebar card">
       <div class="searchrow">
-        <input id="searchInput" type="search" placeholder="Cari kalimat atau kata…" disabled>
+        <input id="searchInput" type="search" placeholder="Cari kata / bagian kalimat…" disabled>
         <button id="clearSearch" class="iconbtn" disabled>×</button>
       </div>
       <div class="filters">
         <label><input id="caseSensitive" type="checkbox"> Huruf besar/kecil</label>
         <label><input id="placeholdersOnly" type="checkbox"> Ada placeholder</label>
       </div>
-      <div id="resultInfo" class="resultinfo">Buka file untuk melihat string.</div>
+      <div id="resultInfo" class="resultinfo">Buka file untuk membuat indeks ringan.</div>
       <div id="results" class="results"></div>
     </aside>
 
