@@ -12,6 +12,49 @@ const state = {
 };
 
 const enc = new TextEncoder();
+
+// Keep a local copy so an Android/Chrome reload or renderer recovery does not leave
+// the UI showing stale file information while the in-memory index is gone.
+const DB_NAME = "ltc-editor-fm2011";
+const DB_STORE = "files";
+const DB_KEY = "last-file";
+function openDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(DB_STORE);
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function cacheFile(file) {
+  try {
+    const db = await openDB();
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readwrite");
+      tx.objectStore(DB_STORE).put({name:file.name, buffer:file.slice(0)} , DB_KEY);
+      tx.oncomplete = resolve; tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  } catch(e) { console.warn("Cache file gagal", e); }
+}
+async function getCachedFile() {
+  try {
+    const db = await openDB();
+    const data = await new Promise((resolve, reject) => {
+      const tx = db.transaction(DB_STORE, "readonly");
+      const req = tx.objectStore(DB_STORE).get(DB_KEY);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => reject(req.error);
+    });
+    db.close();
+    if (!data?.buffer) return null;
+    const blob = data.buffer instanceof Blob ? data.buffer : new Blob([data.buffer]);
+    return new File([blob], data.name || "english.ltc", {type:"application/octet-stream"});
+  } catch(e) { console.warn("Cache read gagal", e); return null; }
+}
+async function clearCachedFile() {
+  try { const db=await openDB(); await new Promise((resolve,reject)=>{ const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).delete(DB_KEY); tx.oncomplete=resolve; tx.onerror=()=>reject(tx.error); }); db.close(); } catch(e) {}
+}
 const dec = new TextDecoder("utf-8", { fatal: false });
 
 function originalTextAt(i) {
@@ -261,7 +304,7 @@ function resetEditor() {
   $("recordId").textContent=$("recordOffset").textContent=$("recordLength").textContent=$("recordPlaceholders").textContent="—";
   $("charInfo").textContent="0 karakter · 0 byte UTF-8"; $("warning").classList.add("hidden");
 }
-function loadFile(file) {
+async function loadFile(file, fromCache=false) {
   const reader = new FileReader();
   reader.onload = async () => {
     try {
@@ -274,13 +317,27 @@ function loadFile(file) {
       if (result.markers.length < 2) throw new Error("Tidak cukup string LTC yang terdeteksi.");
       state.markers=result.markers; state.textOffsets=result.textOffsets; state.lengths=result.lengths; state.indexing=false;
       $("progressWrap").classList.add("hidden"); $("searchInput").disabled=false; $("clearSearch").disabled=false; $("saveBtn").disabled=false; $("revertBtn").disabled=false;
-      setFileInfo(`${file.name} · ${buf.byteLength.toLocaleString("id-ID")} byte · ${state.markers.length.toLocaleString("id-ID")} string · pagination ${state.pageSize}/halaman`);
-      state.filter=""; $("searchInput").value=""; renderResults(); toast(`LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
+      setFileInfo(`${file.name} · ${buf.byteLength.toLocaleString("id-ID")} byte · ${state.markers.length.toLocaleString("id-ID")} string · ${state.pageSize}/halaman`);
+      state.filter=""; $("searchInput").value="";
+      // Always show the first sequential page immediately after indexing.
+      state.searchMode=false; state.lastResults=[]; state.page=0; renderResults();
+      toast(fromCache ? `LTC dipulihkan · ${state.markers.length.toLocaleString("id-ID")} string` : `LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
     } catch(e) {
-      console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden"); toast("File tidak cocok dengan parser LTC ini");
+      console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden");
+      state.original=null; state.markers=[]; state.textOffsets=[]; state.lengths=[]; state.page=0; state.searchMode=false; state.lastResults=[];
+      setFileInfo("File belum dimuat. Silakan buka file LTC lagi."); renderResults();
+      toast("File tidak cocok dengan parser LTC ini");
     }
   };
   reader.readAsArrayBuffer(file);
+  if (!fromCache) await cacheFile(file);
+}
+
+async function restoreCachedFile() {
+  const cached = await getCachedFile();
+  if (!cached) return;
+  setFileInfo(`File terakhir ditemukan di penyimpanan lokal · ${cached.name} · memulihkan…`);
+  loadFile(cached, true);
 }
 
 function changePageSize(value) {
@@ -310,5 +367,6 @@ $("pageSize").addEventListener("change", e => changePageSize(e.target.value));
 $("pageJumpBtn").addEventListener("click", jumpPage); $("pageJump").addEventListener("keydown", e => { if(e.key === "Enter") jumpPage(); });
 $("themeBtn").addEventListener("click", () => { document.body.classList.toggle("light"); localStorage.setItem("ltc-theme", document.body.classList.contains("light")?"light":"dark"); });
 if(localStorage.getItem("ltc-theme")==="light") document.body.classList.add("light");
+restoreCachedFile();
 window.addEventListener("beforeunload", e => { if(state.dirty.size){e.preventDefault();e.returnValue="";} });
 })();
