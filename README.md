@@ -1,15 +1,19 @@
-# LTC Editor FM2011 — Mobile v3
+# LTC Editor FM2011 — Mobile v4
 
-Editor web ringan untuk file `.ltc` Football Manager 2011.
+Editor `.ltc` Football Manager 2011 yang dioptimalkan untuk browser Android.
 
-## Perubahan v3
-- Metadata string disimpan dalam array angka ringkas, bukan 178 ribu objek JavaScript.
-- Pembuatan indeks dilakukan bertahap agar browser Android tidak freeze.
-- Pencarian dilakukan bertahap dan hasil dibatasi 12 item agar scrolling tetap ringan.
-- Tidak menjalankan pencarian ulang setiap kali memilih string.
-- Kalimat lengkap tetap tersedia di editor utama; placeholder seperti `[%club#1-short]` dipertahankan dan dipantau.
-- Hasil pencarian dapat digulir sendiri tanpa membuat seluruh halaman memiliki ribuan node.
-- File diproses lokal di browser.
+## Fokus v4
+- Pagination 10 / 20 / 50 string per halaman (default 20).
+- Hanya halaman aktif yang dibuat menjadi DOM; tidak menampilkan 178 ribu string sekaligus.
+- Jump ke halaman tertentu.
+- Kalimat lengkap tetap ditampilkan saat string dipilih.
+- Placeholder `[%...]` dipertahankan/diperingatkan jika hilang atau berubah.
+- Jika panjang string berubah, **offset string berikutnya dihitung ulang secara dinamis** berdasarkan akumulasi perubahan byte dari string-string sebelumnya.
+- Saat export, header length record ditulis ulang sesuai panjang UTF-8 terbaru.
+- Byte yang tidak diedit dipertahankan dari file asli.
 
-## Deploy
-Upload isi folder ini ke GitHub, lalu gunakan GitHub Pages atau Cloudflare Pages.
+## Logika offset
+Jika string #100 bertambah 20 byte, maka offset efektif string #101 dan semua string setelahnya bergeser +20 byte. Jika string #150 kemudian berkurang 5 byte, string #151 dan setelahnya akan menjadi +15 byte dari posisi awal. Perubahan hanya memengaruhi posisi record setelah titik perubahan; string sebelum perubahan tetap pada offset awal.
+
+## Deployment
+Upload isi folder ini ke GitHub Pages atau Cloudflare Pages sebagai static site. Tidak ada server upload: file `.ltc` diproses lokal di browser.

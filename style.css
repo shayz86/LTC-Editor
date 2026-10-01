@@ -31,3 +31,22 @@ body.light{color:#17202a;background:#f4f7fa}body.light .topbar{background:#fffff
   .editor{order:2;min-height:0}
   #editorText{min-height:260px;height:42vh;}
 }
+
+.pagebar{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:8px 0;}
+.pagebar button{flex:1;min-width:0;}
+.pagebar span{font-size:.82rem;white-space:nowrap;color:var(--muted);text-align:center;}
+.page-options{display:flex;align-items:center;gap:8px;margin:6px 0 8px;flex-wrap:wrap;font-size:.82rem;color:var(--muted);}
+.page-options select,.page-options input{background:var(--panel2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:7px 8px;}
+.page-options input{width:70px;}
+.page-options button{padding:7px 10px;}
+.jump-label{display:flex;align-items:center;gap:5px;}
+.results{contain:content;}
+.result{contain:layout paint;}
+@media (max-width:700px){
+  .workspace{display:flex;flex-direction:column;}
+  .sidebar{max-height:none;}
+  .results{max-height:48vh;overflow:auto;-webkit-overflow-scrolling:touch;}
+  .editor{min-height:0;}
+  .pagebar button{font-size:.78rem;padding:8px 6px;}
+  .page-options{justify-content:space-between;}
+}

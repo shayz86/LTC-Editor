@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v3</div>
+    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v4</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -42,8 +42,31 @@
         <label><input id="caseSensitive" type="checkbox"> Huruf besar/kecil</label>
         <label><input id="placeholdersOnly" type="checkbox"> Ada placeholder</label>
       </div>
+      <div class="pagebar top-pagebar">
+        <button id="prevPageBtn" disabled>← Sebelumnya</button>
+        <span id="pageInfo">Halaman 0 / 0</span>
+        <button id="nextPageBtn" disabled>Berikutnya →</button>
+      </div>
+      <div class="page-options">
+        <label>Per halaman
+          <select id="pageSize">
+            <option value="10">10</option>
+            <option value="20" selected>20</option>
+            <option value="50">50</option>
+          </select>
+        </label>
+        <label class="jump-label">Ke halaman
+          <input id="pageJump" type="number" min="1" inputmode="numeric" placeholder="1">
+        </label>
+        <button id="pageJumpBtn">GO</button>
+      </div>
       <div id="resultInfo" class="resultinfo">Buka file untuk membuat indeks ringan.</div>
       <div id="results" class="results"></div>
+      <div class="pagebar bottom-pagebar">
+        <button id="prevPageBtnBottom" disabled>← Sebelumnya</button>
+        <span id="pageInfoBottom">Halaman 0 / 0</span>
+        <button id="nextPageBtnBottom" disabled>Berikutnya →</button>
+      </div>
     </aside>
 
     <section class="editor card">
