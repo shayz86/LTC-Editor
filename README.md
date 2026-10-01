@@ -1,35 +1,15 @@
-# LTC Editor — Football Manager 2011 · Mobile Optimized
+# LTC Editor FM2011 — Mobile v3
 
-Editor `.ltc` berbasis browser yang dioptimalkan untuk Android/HP dan file FM2011 sekitar 21,7 MB.
+Editor web ringan untuk file `.ltc` Football Manager 2011.
 
-## Optimasi utama
+## Perubahan v3
+- Metadata string disimpan dalam array angka ringkas, bukan 178 ribu objek JavaScript.
+- Pembuatan indeks dilakukan bertahap agar browser Android tidak freeze.
+- Pencarian dilakukan bertahap dan hasil dibatasi 12 item agar scrolling tetap ringan.
+- Tidak menjalankan pencarian ulang setiap kali memilih string.
+- Kalimat lengkap tetap tersedia di editor utama; placeholder seperti `[%club#1-short]` dipertahankan dan dipantau.
+- Hasil pencarian dapat digulir sendiri tanpa membuat seluruh halaman memiliki ribuan node.
+- File diproses lokal di browser.
 
-- Tidak menyimpan 178 ribu teks string sebagai objek JavaScript.
-- Saat file dibuka, aplikasi membuat **indeks ringan** berisi offset + panjang byte.
-- Kalimat asli baru di-decode ketika diperlukan.
-- Pencarian memakai debounce dan hanya merender maksimal 120 hasil.
-- Daftar hasil menampilkan **kalimat lengkap**, bukan potongan/ellipsis.
-- Saat string dipilih, teks lengkap dengan placeholder seperti `[%club#1-short]` dapat diedit langsung.
-- Perubahan hanya disimpan di string yang benar-benar diedit.
-- Jika tidak ada perubahan, file asli di-download tanpa rebuild.
-- Export memperbarui length record hanya untuk string yang diubah.
-- Placeholder yang hilang/bertambah diberi peringatan.
-- Semua pemrosesan tetap lokal di perangkat.
-
-## Struktur LTC yang digunakan
-
-Berdasarkan file FM2011 yang diuji:
-
-`0x01 + uint32 little-endian byteLength + UTF-8 text`
-
-Byte di luar record yang dikenali dipertahankan.
-
-## Deployment
-
-Static site, tanpa build command. Bisa di-host di GitHub Pages atau Cloudflare Pages.
-
-Untuk Cloudflare Pages: framework **None**, build command kosong, output directory `/`.
-
-## Catatan
-
-Format `.ltc` bersifat proprietary. Parser ini dibuat berdasarkan struktur file FM2011 yang dianalisis. Selalu backup file asli dan uji hasil export di game.
+## Deploy
+Upload isi folder ini ke GitHub, lalu gunakan GitHub Pages atau Cloudflare Pages.

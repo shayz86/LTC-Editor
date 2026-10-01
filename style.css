@@ -19,3 +19,15 @@ body.light{color:#17202a;background:#f4f7fa}body.light .topbar{background:#fffff
 .progress-wrap{margin-top:9px}.progress-track{height:6px;background:#202a35;border-radius:999px;overflow:hidden}.progress-bar{height:100%;width:0;background:#4aa3ff;transition:width .08s}.progress-text{font-size:11px;color:#91a0af;margin-top:5px}
 .result{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid #1f2933;border-radius:0;padding:11px 12px;background:transparent;color:inherit}.result-text-full{font-size:13px;line-height:1.5;color:#d4dce5;white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word}.result:hover{background:#141d27}.result.active{background:#17334d;border-left:3px solid #4aa3ff;padding-left:9px}
 @media(max-width:900px){.topbar{padding:12px}.app{padding:9px}.toolbar{margin-bottom:9px}.workspace{gap:9px}.sidebar{min-height:300px;max-height:46vh}.editor{min-height:520px}.result-text-full{font-size:12px}.editor-head{font-size:14px}#editorText{min-height:300px;font-size:13px}.toolbar-row button,.filebtn{padding:9px 10px}}
+/* v3 mobile stability: keep the result viewport finite and avoid giant compositing layers */
+.results{contain:strict;content-visibility:auto;overscroll-behavior:contain;-webkit-overflow-scrolling:touch;}
+.result{contain:content;content-visibility:auto;}
+@media(max-width:900px){
+  body{overflow-x:hidden}
+  .results{max-height:42vh;min-height:120px}
+  .result-text-full{max-height:7.2em;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;}
+  .workspace{display:flex;flex-direction:column}
+  .sidebar{order:1;max-height:none;min-height:0}
+  .editor{order:2;min-height:0}
+  #editorText{min-height:260px;height:42vh;}
+}
