@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#0b0f14">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/icon.svg">
+  <title>LTC Editor — FM 2011</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div>
+    <div class="brand">LTC Editor</div>
+    <div class="subtitle">Football Manager 2011 · Browser Edition</div>
+  </div>
+  <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
+</header>
+
+<main class="app">
+  <section class="toolbar card">
+    <div class="toolbar-row">
+      <label class="filebtn">
+        <input id="fileInput" type="file" accept=".ltc,application/octet-stream">
+        📂 Buka LTC
+      </label>
+      <button id="saveBtn" disabled>💾 Simpan / Download</button>
+      <button id="revertBtn" disabled>↩ Batalkan perubahan</button>
+    </div>
+    <div id="fileInfo" class="fileinfo">Belum ada file. Semua pemrosesan dilakukan lokal di browser.</div>
+  </section>
+
+  <section class="workspace">
+    <aside class="sidebar card">
+      <div class="searchrow">
+        <input id="searchInput" type="search" placeholder="Cari kalimat atau kata…" disabled>
+        <button id="clearSearch" class="iconbtn" disabled>×</button>
+      </div>
+      <div class="filters">
+        <label><input id="caseSensitive" type="checkbox"> Huruf besar/kecil</label>
+        <label><input id="placeholdersOnly" type="checkbox"> Ada placeholder</label>
+      </div>
+      <div id="resultInfo" class="resultinfo">Buka file untuk melihat string.</div>
+      <div id="results" class="results"></div>
+    </aside>
+
+    <section class="editor card">
+      <div class="editor-head">
+        <div>
+          <span id="recordTitle">Belum ada string dipilih</span>
+          <span id="dirtyBadge" class="badge hidden">DIUBAH</span>
+        </div>
+        <div class="navbuttons">
+          <button id="prevBtn" disabled>←</button>
+          <button id="nextBtn" disabled>→</button>
+        </div>
+      </div>
+      <div class="meta-grid">
+        <div><span>ID</span><code id="recordId">—</code></div>
+        <div><span>Offset</span><code id="recordOffset">—</code></div>
+        <div><span>Panjang byte</span><code id="recordLength">—</code></div>
+        <div><span>Placeholder</span><code id="recordPlaceholders">—</code></div>
+      </div>
+      <div class="warning hidden" id="warning"></div>
+      <textarea id="editorText" spellcheck="false" disabled placeholder="Pilih string dari daftar di kiri…"></textarea>
+      <div class="editor-foot">
+        <div id="charInfo">0 karakter · 0 byte UTF-8</div>
+        <button id="applyBtn" disabled>✓ Terapkan perubahan</button>
+      </div>
+    </section>
+  </section>
+</main>
+
+<div id="toast" class="toast"></div>
+<script src="app.js"></script>
+</body>
+</html>
