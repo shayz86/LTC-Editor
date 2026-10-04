@@ -75,7 +75,10 @@ function countPrintable(s) {
 }
 
 async function buildIndexAsync(buffer, onProgress) {
-  const bytes = new Uint8Array(buffer), view = new DataView(buffer);
+  // Accept both ArrayBuffer and Uint8Array. The round-trip validator passes
+  // the generated Uint8Array directly; DataView requires an ArrayBuffer.
+  const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   // Exact FM2011 LTC layout observed in the supplied file:
   //   52-byte header
   //   178700 variable records: marker(1) + uint32le byteLength + UTF-8 text

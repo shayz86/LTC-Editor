@@ -1,4 +1,4 @@
-# LTC Editor FM2011 — Mobile v10 — Dynamic Index
+# LTC Editor FM2011 — Mobile v11 — Dynamic Index
 
 Editor `.ltc` Football Manager 2011 yang dioptimalkan untuk browser Android.
 
@@ -26,3 +26,9 @@ Versi ini menggunakan struktur LTC FM2011 yang terdeteksi pada `english.ltc`: 52
 Sebelum download, file hasil divalidasi ulang: jumlah record, panjang setiap record, jumlah index, ID index, flags, offset efektif, dan footer harus konsisten. File tanpa perubahan direbuild byte-for-byte identik dengan file asli. Setelah export, V10 juga membuka kembali hasil menggunakan parser yang sama dan membandingkan seluruh ID, flag, panjang, dan isi 178.700 string sebelum file di-download.
 
 **Penting:** jangan gunakan versi lama untuk menguji edit dengan perubahan panjang byte. Gunakan v7 dan simpan backup `english.ltc` asli.
+
+
+## V11 fix
+- Fixes the Android/Chrome save error `First argument to DataView constructor must be an ArrayBuffer`.
+- The LTC parser now accepts both `ArrayBuffer` and `Uint8Array`, including the generated buffer used by round-trip validation.
+- Dynamic-length records and index rebuilding remain unchanged from V10.
