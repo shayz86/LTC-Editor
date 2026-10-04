@@ -10,7 +10,9 @@ const state = {
   filter: "", caseSensitive: false, placeholdersOnly: false,
   dirty: new Map(), lastResults: [], searchMode: false,
   searchToken: 0, indexing: false,
-  translation: { running:false, paused:false, done:0, total:0, errors:0, key:"", model:"gemini-3.8-flash", batch:20 }
+  translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
+  translationEndpoint: "https://translate.argosopentech.com", translationCache: new Map(), translationQueue: [],
+  translationDb: null
 };
 
 const enc = new TextEncoder();
@@ -20,6 +22,32 @@ const enc = new TextEncoder();
 const DB_NAME = "ltc-editor-fm2011";
 const DB_STORE = "files";
 const DB_KEY = "last-file";
+const TDB_NAME = "ltc-editor-fm2011-translations";
+const TDB_STORE = "translations";
+function openTranslationDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(TDB_NAME, 1);
+    req.onupgradeneeded = () => { const db=req.result; if(!db.objectStoreNames.contains(TDB_STORE)) db.createObjectStore(TDB_STORE); };
+    req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error);
+  });
+}
+async function getTranslationCache(key) {
+  if (state.translationCache.has(key)) return state.translationCache.get(key);
+  try { const db=await openTranslationDB(); const v=await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readonly"),r=tx.objectStore(TDB_STORE).get(key);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error)}); db.close(); if(v){state.translationCache.set(key,v); return v;} } catch(e){}
+  return null;
+}
+async function putTranslationCache(key,value) {
+  state.translationCache.set(key,value);
+  try { const db=await openTranslationDB(); await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readwrite");tx.objectStore(TDB_STORE).put(value,key);tx.oncomplete=res;tx.onerror=()=>rej(tx.error)}); db.close(); } catch(e){}
+}
+async function clearTranslationCache() {
+  state.translationCache.clear();
+  try { const db=await openTranslationDB(); await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readwrite");tx.objectStore(TDB_STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)}); db.close(); } catch(e){}
+}
+function hashText(s) {
+  let h=2166136261; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);} return (h>>>0).toString(16);
+}
+
 function openDB() {
   return new Promise((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, 1);
@@ -474,6 +502,118 @@ async function verifyRoundTrip(bytes) {
   return true;
 }
 
+// ---------- Free bulk translation (LibreTranslate / Argos) ----------
+function getTranslateEndpoint() {
+  const v=$("translateEndpoint")?.value || state.translationEndpoint;
+  return v === "custom" ? ($("customEndpoint")?.value || "").trim().replace(/\/$/,"") : v.replace(/\/$/,"");
+}
+function translationCandidates() {
+  const arr=[]; const primary=getTranslateEndpoint(); if(primary) arr.push(primary);
+  const defaults=["https://translate.argosopentech.com","https://libretranslate.de","https://translate.mentality.rip"];
+  for(const x of defaults) if(!arr.includes(x)) arr.push(x); return arr;
+}
+function maskPlaceholders(text) {
+  const map=[]; const masked=text.replace(/\[%[^\]]+\]/g, m=>{const n=map.length;map.push(m);return `__LTC_PH_${n}__`;});
+  return {masked,map};
+}
+function restorePlaceholders(text,map) {
+  for(let i=0;i<map.length;i++) { const token=`__LTC_PH_${i}__`; if(!text.includes(token)) return null; text=text.split(token).join(map[i]); }
+  return text;
+}
+function shouldTranslateText(text) {
+  const t=text.trim(); if(!t) return false;
+  if(t.length<2) return false;
+  if(!/[A-Za-z]/.test(t)) return false;
+  // Skip obvious technical/code-only strings.
+  if(/^(https?:\/\/|www\.|[A-Z0-9_./:-]+$)/.test(t) && !/\s/.test(t)) return false;
+  if(/^[%$#@{}<>\[\]()+*=0-9._\-\/\\]+$/.test(t)) return false;
+  return true;
+}
+function normalizeForMemory(text) { return text.replace(/\s+/g," ").trim(); }
+function splitBatchText(items) {
+  const parts=[]; const sep=(n)=>`\n\n__LTC_ITEM_${n}_END__\n\n`;
+  for(let n=0;n<items.length;n++){ const m=maskPlaceholders(items[n].text).masked.replace(/\r?\n/g," __LTC_NL__ "); parts.push(m+sep(n)); }
+  return parts.join("");
+}
+function parseBatchText(raw, items) {
+  const outputs=[];
+  for(let n=0;n<items.length;n++){
+    const marker=`__LTC_ITEM_${n}_END__`; const pos=raw.indexOf(marker);
+    if(pos<0) return null;
+    let start= n===0 ? 0 : raw.lastIndexOf(`__LTC_ITEM_${n-1}_END__`,pos)+(`__LTC_ITEM_${n-1}_END__`).length;
+    let val=raw.slice(start,pos).trim().replace(/__LTC_NL__/g,"\n");
+    const restored=restorePlaceholders(val,items[n].placeholders);
+    if(restored===null) return null;
+    outputs.push(restored);
+  }
+  return outputs;
+}
+async function callTranslate(endpoint, text) {
+  const key=$("translateApiKey")?.value?.trim() || "";
+  const res=await fetch(endpoint+"/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:text,source:"en",target:"id",format:"text",...(key?{api_key:key}:{})})});
+  if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+  const data=await res.json(); if(!data.translatedText) throw new Error("Server tidak mengembalikan translatedText");
+  return data.translatedText;
+}
+async function testTranslationServer() {
+  const endpoints=translationCandidates(); let last="";
+  for(const ep of endpoints){ try { const out=await callTranslate(ep,"Hello, this is a test."); if(out){ state.translationEndpoint=ep; toast(`Server siap: ${ep}`); return true; } } catch(e){last=e.message;} }
+  toast(`Server gratis tidak merespons: ${last||"gagal"}`); return false;
+}
+async function buildTranslationQueue() {
+  const mode=$("translateMode")?.value||"all"; let indices=[];
+  if(mode==="page") indices=pageItems();
+  else { const limit=mode==="1000"?1000:Infinity; for(let i=0;i<state.indexCount && indices.length<limit;i++) indices.push(i); }
+  const unique=new Map(); const queue=[]; let cached=0, skipped=0;
+  for(const i of indices){
+    const text=decodeAt(i); if(!shouldTranslateText(text)){skipped++;continue;}
+    if(state.dirty.has(i)) { skipped++; continue; }
+    const norm=normalizeForMemory(text); const key=hashText(norm); const cachedVal=await getTranslationCache(key);
+    if(cachedVal){ state.dirty.set(i,cachedVal); cached++; continue; }
+    if(unique.has(key)) unique.get(key).indices.push(i);
+    else { const ph=placeholders(text); const item={key,text,placeholders:ph,indices:[i]}; unique.set(key,item); queue.push(item); }
+    if((i&255)===0) await new Promise(r=>setTimeout(r,0));
+  }
+  return {queue,cached,skipped,total:indices.length};
+}
+async function translateItemBatch(items, endpoint) {
+  const prepared=items.map(x=>({...x,placeholders:x.placeholders}));
+  const payload=splitBatchText(prepared);
+  try { const raw=await callTranslate(endpoint,payload); const parsed=parseBatchText(raw,prepared); if(parsed) return parsed; } catch(e) { throw e; }
+  // If a server mangles separators, retry each item separately. This is slower but safe.
+  const outputs=[];
+  for(const item of prepared){
+    const masked=maskPlaceholders(item.text); const raw=await callTranslate(endpoint,masked.masked.replace(/\r?\n/g," __LTC_NL__ ")); const restored=restorePlaceholders(raw.replace(/__LTC_NL__/g,"\n"),masked.map); if(restored===null) throw new Error("Placeholder rusak oleh mesin terjemahan"); outputs.push(restored); await new Promise(r=>setTimeout(r,250));
+  }
+  return outputs;
+}
+async function startTranslation() {
+  if(state.translationRunning || !state.original) return;
+  state.translationPaused=false; state.translationRunning=true; $("translateStartBtn").disabled=true; $("translatePauseBtn").disabled=false;
+  $("translateProgressWrap").classList.remove("hidden");
+  try {
+    const plan=await buildTranslationQueue(); state.translationQueue=plan.queue; state.translationTotal=plan.queue.length; state.translationDone=0;
+    $("translateStats").textContent=`Antrian unik: ${plan.queue.length.toLocaleString("id-ID")} · cache: ${plan.cached.toLocaleString("id-ID")} · dilewati: ${plan.skipped.toLocaleString("id-ID")}`;
+    if(!plan.queue.length){ refreshPageOffsets(); toast("Tidak ada string baru yang perlu diterjemahkan"); return; }
+    const batchSize=Number($("translateBatch").value)||10; let cursor=0; let endpoints=translationCandidates(); let epIndex=Math.max(0,endpoints.indexOf(state.translationEndpoint));
+    while(cursor<plan.queue.length){
+      if(state.translationPaused){ toast("Terjemahan dijeda"); return; }
+      const batch=plan.queue.slice(cursor,cursor+batchSize); let done=false, lastErr="";
+      for(let tries=0;tries<endpoints.length && !done;tries++){
+        const ep=endpoints[(epIndex+tries)%endpoints.length];
+        try { const outputs=await translateItemBatch(batch,ep); for(let j=0;j<batch.length;j++){const item=batch[j], out=outputs[j].trim(); await putTranslationCache(item.key,out); for(const idx of item.indices) state.dirty.set(idx,out);} state.translationEndpoint=ep; done=true; } catch(e){ lastErr=e.message; }
+      }
+      if(!done) throw new Error(`Semua server gratis gagal: ${lastErr}`);
+      cursor+=batch.length; state.translationDone=cursor; const pct=Math.floor(cursor/plan.queue.length*100); $("translateProgressBar").style.width=pct+"%"; $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%`;
+      refreshPageOffsets(); await new Promise(r=>setTimeout(r,350));
+    }
+    toast(`Terjemahan selesai · ${plan.queue.length.toLocaleString("id-ID")} teks unik`);
+  } catch(e){ console.error(e); toast(`Terjemahan berhenti: ${e.message}`); $("translateProgressText").textContent=e.message; }
+  finally { state.translationRunning=false; $("translateStartBtn").disabled=!state.original; $("translatePauseBtn").disabled=true; }
+}
+function pauseTranslation(){ if(state.translationRunning){state.translationPaused=true; $("translatePauseBtn").disabled=true;} }
+function updateTranslationUI(){ const ok=!!state.original; $("translateStartBtn").disabled=!ok || state.translationRunning; $("translateTestBtn").disabled=!ok || state.translationRunning; $("translateClearCacheBtn").disabled=!ok || state.translationRunning; }
+
 function downloadBytes(bytes, name) {
   const blob = new Blob([bytes], {type:"application/octet-stream"}), a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -497,143 +637,6 @@ async function saveFile() {
   } catch (e) { console.error(e); toast(`Gagal membuat LTC: ${e.message}`); }
   finally { $("progressWrap").classList.add("hidden"); saveBtn.disabled = false; }
 }
-
-// ---------- AI translation (optional, user-supplied Gemini key) ----------
-const TRANSLATE_KEY_STORAGE = "ltc-gemini-settings-v12";
-function loadTranslateSettings(){
-  try{
-    const x=JSON.parse(localStorage.getItem(TRANSLATE_KEY_STORAGE)||"{}");
-    $("geminiKey").value=x.key||"";
-    $("geminiModel").value=x.model||"gemini-3.8-flash";
-    $("translateBatch").value=String(x.batch||20);
-    $("autoTranslate").checked=!!x.auto;
-    state.translation.key=x.key||""; state.translation.model=x.model||"gemini-3.8-flash"; state.translation.batch=Number(x.batch)||20;
-  }catch(e){}
-}
-function saveTranslateSettings(){
-  const key=$("geminiKey").value.trim(), model=$("geminiModel").value.trim()||"gemini-3.8-flash", batch=Number($("translateBatch").value)||20, auto=$("autoTranslate").checked;
-  state.translation.key=key; state.translation.model=model; state.translation.batch=batch;
-  localStorage.setItem(TRANSLATE_KEY_STORAGE, JSON.stringify({key,model,batch,auto}));
-  toast(key?"Pengaturan AI disimpan di browser":"API key dikosongkan");
-}
-function translationCandidates(){
-  const arr=[];
-  for(let i=0;i<state.indexCount;i++){
-    if(state.dirty.has(i)) continue;
-    const text=originalTextAt(i);
-    if(!/[A-Za-z]/.test(text)) continue;
-    if(text.trim().length<2) continue;
-    arr.push(i);
-  }
-  return arr;
-}
-function protectText(text){
-  const tokens=[];
-  const protectedText=text.replace(/(\[%[^\]]+\]|%[A-Za-z][A-Za-z0-9_#.-]*(?:\[[^\]]*\])?|\{[^{}]+\})/g,m=>{
-    const token=`___LTC_TOKEN_${tokens.length}___`;
-    tokens.push(m); return token;
-  });
-  return {text:protectedText,tokens};
-}
-function restoreProtected(text,tokens){
-  for(let i=0;i<tokens.length;i++){
-    const token=`___LTC_TOKEN_${i}___`;
-    if(!text.includes(token)) throw new Error(`Placeholder hilang: ${tokens[i]}`);
-    text=text.split(token).join(tokens[i]);
-  }
-  return text;
-}
-function translationPrompt(items){
-  return `You are translating Football Manager 2011 English language strings into natural Indonesian.
-Rules:
-- Translate English words and sentences into natural Indonesian, suitable for an Indonesian football management game.
-- Keep the meaning and tone. Do not add explanations.
-- Preserve every token like ___LTC_TOKEN_0___ exactly, character-for-character, and keep their relative position as appropriate.
-- Preserve line breaks and punctuation unless Indonesian grammar requires a harmless adjustment.
-- Do not translate proper names, player names, club names, competition names, abbreviations, codes, or technical identifiers unless they are clearly ordinary English words.
-- Return ONLY a JSON array of objects with fields id and text. Keep every id exactly.
-
-INPUT:
-${JSON.stringify(items)}`;
-}
-async function callGeminiTranslation(items){
-  const key=state.translation.key||$("geminiKey").value.trim();
-  const model=state.translation.model||$("geminiModel").value.trim()||"gemini-3.8-flash";
-  if(!key) throw new Error("API key Gemini belum diisi.");
-  const payload={
-    contents:[{role:"user",parts:[{text:translationPrompt(items)}]}],
-    generationConfig:{responseMimeType:"application/json",responseSchema:{type:"array",items:{type:"object",properties:{id:{type:"integer"},text:{type:"string"}},required:["id","text"]}}}
-  };
-  let last="";
-  for(let attempt=0;attempt<3;attempt++){
-    try{
-      const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
-        method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify(payload)
-      });
-      const raw=await res.text();
-      if(!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${raw.slice(0,300)}`);
-      const data=JSON.parse(raw);
-      const txt=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
-      if(!txt) throw new Error("Gemini tidak mengembalikan teks.");
-      const parsed=JSON.parse(txt);
-      if(!Array.isArray(parsed)) throw new Error("Respons terjemahan bukan array JSON.");
-      return parsed;
-    }catch(e){ last=e.message||String(e); if(attempt<2) await new Promise(r=>setTimeout(r,1500*(attempt+1))); }
-  }
-  throw new Error(last||"Gagal menghubungi Gemini.");
-}
-function setTranslationUI(){
-  const t=state.translation, bar=$("translateBar"), status=$("translateStatus"), all=$("translateAllBtn"), pause=$("pauseTranslateBtn");
-  if(!state.original){all.disabled=true; pause.disabled=true; status.textContent="Belum ada file."; bar.style.width="0%"; return;}
-  all.disabled=t.running||!t.key; pause.disabled=!t.running;
-  const pct=t.total?Math.min(100,(t.done/t.total)*100):0; bar.style.width=`${pct}%`;
-  status.textContent=t.running?`Menerjemahkan ${t.done.toLocaleString("id-ID")} / ${t.total.toLocaleString("id-ID")} · error ${t.errors}`:`${t.done.toLocaleString("id-ID")} / ${t.total.toLocaleString("id-ID")} selesai · error ${t.errors}`;
-}
-async function translateAll(){
-  if(!state.original) return toast("Buka LTC terlebih dahulu");
-  if(state.translation.running) return;
-  saveTranslateSettings();
-  if(!state.translation.key) return toast("Masukkan Gemini API Key terlebih dahulu");
-  const candidates=translationCandidates();
-  state.translation.running=true; state.translation.paused=false; state.translation.done=0; state.translation.errors=0; state.translation.total=candidates.length; setTranslationUI();
-  toast(`Mulai menerjemahkan ${candidates.length.toLocaleString("id-ID")} string…`);
-  try{
-    for(let pos=0;pos<candidates.length;pos+=state.translation.batch){
-      if(state.translation.paused) break;
-      const ids=candidates.slice(pos,pos+state.translation.batch);
-      const items=ids.map(id=>{const p=protectText(originalTextAt(id)); return {id,text:p.text};});
-      try{
-        const result=await callGeminiTranslation(items);
-        const byId=new Map(result.map(x=>[Number(x.id),String(x.text??"")]));
-        for(const id of ids){
-          const original=originalTextAt(id), protectedInfo=protectText(original), out=byId.get(id);
-          if(typeof out!=="string") throw new Error(`String #${id+1} tidak ada dalam respons Gemini.`);
-          const restored=restoreProtected(out,protectedInfo.tokens);
-          if(!restored.trim()) throw new Error(`String #${id+1} menghasilkan terjemahan kosong.`);
-          if(restored!==original) state.dirty.set(id,restored);
-        }
-        invalidateDeltaCache();
-        state.translation.done+=ids.length;
-        renderResults(); if(state.selected>=0) selectRecord(state.selected);
-      }catch(e){
-        console.error(e); state.translation.errors+=ids.length; state.translation.done+=ids.length; toast(`Batch gagal: ${e.message}`);
-      }
-      setTranslationUI();
-      await new Promise(r=>setTimeout(r,250));
-    }
-  }finally{
-    state.translation.running=false; setTranslationUI();
-    if(state.translation.paused) toast("Terjemahan dijeda. Tekan Terjemahkan semua untuk melanjutkan yang belum diterjemahkan.");
-    else toast(`Terjemahan selesai: ${state.dirty.size.toLocaleString("id-ID")} string berubah.`);
-  }
-}
-function pauseTranslation(){ if(state.translation.running){state.translation.paused=true; toast("Menjeda setelah batch berjalan selesai…");} }
-function maybeAutoTranslate(){
-  if($("autoTranslate")?.checked && state.translation.key && state.original){
-    setTimeout(()=>translateAll(),700);
-  }
-}
-
 function resetEditor() {
   state.selected=-1; state.dirty.clear(); $("editorText").value=""; $("editorText").disabled=true; $("applyBtn").disabled=true;
   $("prevBtn").disabled=true; $("nextBtn").disabled=true; $("dirtyBadge").classList.add("hidden"); $("recordTitle").textContent="Belum ada string dipilih";
@@ -657,13 +660,13 @@ async function loadFile(file, fromCache=false) {
       state.filter=""; $("searchInput").value="";
       // Always show the first sequential page immediately after indexing.
       state.searchMode=false; state.lastResults=[]; state.page=0; renderResults();
+      updateTranslationUI();
       toast(fromCache ? `LTC dipulihkan · ${state.markers.length.toLocaleString("id-ID")} string` : `LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
-      setTranslationUI(); maybeAutoTranslate();
     } catch(e) {
       console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden");
       state.original=null; state.markers=[]; state.textOffsets=[]; state.lengths=[]; state.indexStart=0; state.indexCount=0; state.indexIds=[]; state.indexFlags=[]; invalidateDeltaCache(); state.page=0; state.searchMode=false; state.lastResults=[];
       setFileInfo("File belum dimuat. Silakan buka file LTC lagi."); renderResults();
-      toast("File tidak cocok dengan parser LTC ini");
+      updateTranslationUI(); toast("File tidak cocok dengan parser LTC ini");
     }
   };
   reader.readAsArrayBuffer(file);
@@ -686,6 +689,12 @@ function jumpPage() {
   goPage(n - 1); $("pageJump").value = "";
 }
 
+$("translateEndpoint").addEventListener("change", e => { if(e.target.value!=="custom") state.translationEndpoint=e.target.value; $("customEndpointWrap").classList.toggle("hidden",e.target.value!=="custom"); });
+$("translateSettingsBtn").addEventListener("click", () => { $("customEndpointWrap").classList.toggle("hidden"); });
+$("translateTestBtn").addEventListener("click", testTranslationServer);
+$("translateStartBtn").addEventListener("click", startTranslation);
+$("translatePauseBtn").addEventListener("click", pauseTranslation);
+$("translateClearCacheBtn").addEventListener("click", async()=>{ if(confirm("Hapus semua cache terjemahan yang tersimpan di browser?")){await clearTranslationCache(); toast("Cache terjemahan dihapus");} });
 $("fileInput").addEventListener("change", e => { const f=e.target.files?.[0]; if(f) loadFile(f); });
 let searchTimer;
 $("searchInput").addEventListener("input", e => { state.filter=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(searchMatches,280); });
@@ -704,14 +713,6 @@ $("pageSize").addEventListener("change", e => changePageSize(e.target.value));
 $("pageJumpBtn").addEventListener("click", jumpPage); $("pageJump").addEventListener("keydown", e => { if(e.key === "Enter") jumpPage(); });
 $("themeBtn").addEventListener("click", () => { document.body.classList.toggle("light"); localStorage.setItem("ltc-theme", document.body.classList.contains("light")?"light":"dark"); });
 if(localStorage.getItem("ltc-theme")==="light") document.body.classList.add("light");
-loadTranslateSettings();
-$("translateSettingsBtn").addEventListener("click",()=>$("translateSettings").classList.toggle("hidden"));
-$("saveGeminiKey").addEventListener("click",saveTranslateSettings);
-$("translateAllBtn").addEventListener("click",translateAll);
-$("pauseTranslateBtn").addEventListener("click",pauseTranslation);
-$("geminiModel").addEventListener("change",()=>{state.translation.model=$("geminiModel").value.trim()||"gemini-3.8-flash";});
-$("translateBatch").addEventListener("change",()=>{state.translation.batch=Number($("translateBatch").value)||20;});
-setTranslationUI();
 restoreCachedFile();
 window.addEventListener("beforeunload", e => { if(state.dirty.size){e.preventDefault();e.returnValue="";} });
 })();
