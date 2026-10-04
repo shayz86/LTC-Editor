@@ -1,4 +1,4 @@
-# LTC Editor FM2011 — Mobile v5
+# LTC Editor FM2011 — Mobile v6 — Safe Rebuild
 
 Editor `.ltc` Football Manager 2011 yang dioptimalkan untuk browser Android.
 
@@ -17,3 +17,12 @@ Jika string #100 bertambah 20 byte, maka offset efektif string #101 dan semua st
 
 ## Deployment
 Upload isi folder ini ke GitHub Pages atau Cloudflare Pages sebagai static site. Tidak ada server upload: file `.ltc` diproses lokal di browser.
+
+
+## FM2011 Safe Rebuild v6
+
+Versi ini menggunakan struktur LTC FM2011 yang terdeteksi pada `english.ltc`: 40-byte header, 178.699 record string, lalu index 9-byte per record dan footer 4-byte. Saat panjang string berubah, editor membangun ulang record secara berurutan dan memperbarui field offset pada seluruh index setelah perubahan.
+
+Sebelum download, file hasil divalidasi ulang: jumlah record, panjang setiap record, jumlah index, ID index, flags, offset efektif, dan footer harus konsisten. File tanpa perubahan direbuild byte-for-byte identik dengan file asli.
+
+**Penting:** jangan gunakan versi lama untuk menguji edit dengan perubahan panjang byte. Gunakan v6 dan simpan backup `english.ltc` asli.
