@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v13 — Free Bulk Translate</div>
+    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v14 — Offline AI Translate</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -35,28 +35,32 @@
   <section class="translator card">
     <div class="translator-head">
       <div>
-        <strong>🤖 Terjemahan Otomatis Gratis</strong>
-        <div class="muted small">Mesin LibreTranslate/Argos · tanpa Gemini · hasil disimpan di browser</div>
+        <strong>🤖 Terjemahan AI Lokal — English → Indonesia</strong>
+        <div class="muted small">Tanpa API key, tanpa server terjemahan. Model berjalan langsung di browser memakai Transformers.js.</div>
       </div>
       <button id="translateSettingsBtn" type="button">⚙ Pengaturan</button>
     </div>
     <div class="translator-grid">
-      <label>Server
-        <select id="translateEndpoint">
-          <option value="https://translate.argosopentech.com">Argos OpenTech (gratis, jika tersedia)</option>
-          <option value="https://libretranslate.de">LibreTranslate.de (komunitas)</option>
-          <option value="https://translate.mentality.rip">Community LibreTranslate</option>
-          <option value="custom">Server sendiri…</option>
+      <label>Model
+        <select id="translateModel">
+          <option value="Xenova/opus-mt-en-id" selected>MarianMT English → Indonesian</option>
+        </select>
+      </label>
+      <label>Mode perangkat
+        <select id="translateDevice">
+          <option value="auto" selected>Otomatis</option>
+          <option value="wasm">CPU / WASM (lebih kompatibel)</option>
+          <option value="webgpu">WebGPU (jika didukung)</option>
         </select>
       </label>
       <label>Batch
         <select id="translateBatch">
-          <option value="5">5 string</option>
-          <option value="10" selected>10 string</option>
-          <option value="20">20 string</option>
+          <option value="1">1 string</option>
+          <option value="2" selected>2 string</option>
+          <option value="4">4 string</option>
         </select>
       </label>
-      <label>Mode
+      <label>Mode terjemahan
         <select id="translateMode">
           <option value="all">Semua string yang perlu diterjemahkan</option>
           <option value="page">Halaman saat ini</option>
@@ -64,21 +68,26 @@
         </select>
       </label>
     </div>
-    <div id="customEndpointWrap" class="hidden settings-row">
-      <input id="customEndpoint" type="url" placeholder="https://server-anda/translate">
-      <input id="translateApiKey" type="password" placeholder="API key (opsional, jika server memerlukan)">
+    <div id="translateSettingsExtra" class="hidden settings-row">
+      <label class="checkline"><input id="translateOnlyEnglish" type="checkbox" checked> Lewati teks yang tampak non-Inggris / kode</label>
+      <label class="checkline"><input id="translateUseCache" type="checkbox" checked> Gunakan cache terjemahan</label>
     </div>
     <div class="translator-actions">
-      <button id="translateTestBtn" disabled>🔌 Tes server</button>
+      <button id="translateLoadBtn" disabled>⬇ Muat Model</button>
+      <button id="translateTestBtn" disabled>🧪 Tes 5 String</button>
       <button id="translateStartBtn" disabled>▶ Mulai Translate</button>
       <button id="translatePauseBtn" disabled>⏸ Jeda</button>
-      <button id="translateClearCacheBtn" disabled>🧹 Hapus cache terjemahan</button>
+      <button id="translateClearCacheBtn" disabled>🧹 Hapus Cache</button>
+    </div>
+    <div id="translateModelProgressWrap" class="progress-wrap hidden">
+      <div class="progress-track"><div id="translateModelProgressBar" class="progress-bar"></div></div>
+      <div id="translateModelProgressText" class="progress-text">Model belum dimuat.</div>
     </div>
     <div id="translateProgressWrap" class="progress-wrap hidden">
       <div class="progress-track"><div id="translateProgressBar" class="progress-bar"></div></div>
       <div id="translateProgressText" class="progress-text">Belum mulai.</div>
     </div>
-    <div id="translateStats" class="translate-stats">Belum ada file. Terjemahan otomatis tidak berjalan saat file dibuka.</div>
+    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. Model tidak diunduh otomatis.</div>
   </section>
 
   <section class="workspace">
@@ -146,6 +155,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script src="app.js?v=13"></script>
+<script type="module" src="app.js?v=14"></script>
 </body>
 </html>

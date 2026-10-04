@@ -1,29 +1,20 @@
-# LTC Editor FM2011 Mobile v13 — Free Bulk Translate
+# LTC Editor FM2011 Mobile v14 — Offline AI Translate
 
-Editor browser untuk file bahasa Football Manager 2011 `.ltc`.
+Browser-based editor for Football Manager Touch 2011 `.ltc` language files.
 
-## Fitur LTC
-- Parser struktur FM2011 yang diuji pada file 20.604.686 byte / 178.700 record.
-- Header 52 byte, record variable-length, record count, index 9-byte per record, footer 4 byte.
-- ID, marker, flag, dan gap asli dipertahankan.
-- Teks boleh bertambah/berkurang byte; offset dan index dibangun ulang.
-- Validasi struktur dan round-trip sebelum download.
+## What changed in v14
+- Replaces unreliable public LibreTranslate servers with **local browser inference** using Hugging Face Transformers.js + `Xenova/opus-mt-en-id` (MarianMT English → Indonesian).
+- No Gemini API key and no translation server/API quota.
+- Model is downloaded once and reused from the browser cache when supported.
+- WebGPU is used when selected/available; CPU/WASM fallback is available.
+- Quantized model modes: q4 for WebGPU and q8 for CPU/WASM.
+- Batch translation, duplicate-string deduplication, IndexedDB translation cache, pause/resume.
+- Protects LTC `[%...]` placeholders and line breaks during translation.
+- **The validated v11 LTC save/rebuild engine is retained.** IDs/order stay unchanged; physical offsets are rebuilt when byte lengths change.
 
-## Terjemahan otomatis gratis
-V13 menambahkan batch translation melalui server yang kompatibel dengan LibreTranslate/Argos Translate. LibreTranslate adalah software open-source yang menggunakan Argos Translate; server self-hosted dapat dijalankan offline/gratis. Server publik dapat berubah status, memerlukan API key, atau membatasi penggunaan, jadi gunakan tombol **Tes server** sebelum memulai. Jangan menganggap server komunitas sebagai layanan permanen.
+## Important
+The first model load requires an internet connection to Hugging Face/CDN. After the model and browser cache are available, translation inference itself runs locally in the browser. The MarianMT model is around the hundreds-of-MB scale, so the first load can be large; quantized variants reduce the download substantially.
 
-Fitur:
-- batch 5/10/20 string;
-- deduplicate string identik;
-- translation memory/cache IndexedDB;
-- pause/resume sesi (cache tetap tersimpan);
-- mode halaman, maksimal 1.000, atau semua;
-- placeholder `[%...]` dilindungi dan divalidasi;
-- fallback ke terjemahan per-string jika separator batch rusak;
-- tidak menjalankan terjemahan otomatis saat file dibuka;
-- tidak membutuhkan Gemini API key.
+The tool does not guarantee that every machine-translated Football Manager sentence is stylistically perfect. Review/polish the Indonesian result before saving.
 
-Untuk penggunaan gratis skala besar yang stabil, jalankan LibreTranslate sendiri di PC/server dan masukkan endpoint-nya pada **Server sendiri**. Dokumentasi resmi LibreTranslate menjelaskan self-hosting/offline dan endpoint `/translate`.
-
-## Catatan
-Kualitas Argos/LibreTranslate adalah machine translation. Hasilnya dimaksudkan sebagai draft yang kemudian dirapikan manual, terutama istilah Football Manager dan kalimat yang kontekstual.
+Model reference: `Xenova/opus-mt-en-id`.

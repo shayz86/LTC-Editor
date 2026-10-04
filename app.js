@@ -1,3 +1,5 @@
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.0";
+
 (() => {
 "use strict";
 
@@ -11,8 +13,8 @@ const state = {
   dirty: new Map(), lastResults: [], searchMode: false,
   searchToken: 0, indexing: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
-  translationEndpoint: "https://translate.argosopentech.com", translationCache: new Map(), translationQueue: [],
-  translationDb: null
+  translationCache: new Map(), translationQueue: [], translationDb: null,
+  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id"
 };
 
 const enc = new TextEncoder();
@@ -502,117 +504,207 @@ async function verifyRoundTrip(bytes) {
   return true;
 }
 
-// ---------- Free bulk translation (LibreTranslate / Argos) ----------
-function getTranslateEndpoint() {
-  const v=$("translateEndpoint")?.value || state.translationEndpoint;
-  return v === "custom" ? ($("customEndpoint")?.value || "").trim().replace(/\/$/,"") : v.replace(/\/$/,"");
+// ---------- Offline AI bulk translation (Transformers.js / MarianMT) ----------
+// The model is hosted on Hugging Face and executed locally in the browser via ONNX.
+// Transformers.js supports browser-side translation and quantized dtypes for smaller downloads.
+const TRANSFORMERS_MODEL = "Xenova/opus-mt-en-id";
+let transformersReady = true;
+try {
+  env.allowRemoteModels = true;
+  env.allowLocalModels = false;
+  env.useBrowserCache = true;
+} catch(e) { console.warn("Transformers env", e); }
+
+function getTranslationDevice() {
+  const selected = $("translateDevice")?.value || "auto";
+  if (selected === "webgpu") return navigator.gpu ? "webgpu" : "wasm";
+  if (selected === "wasm") return "wasm";
+  return navigator.gpu ? "webgpu" : "wasm";
 }
-function translationCandidates() {
-  const arr=[]; const primary=getTranslateEndpoint(); if(primary) arr.push(primary);
-  const defaults=["https://translate.argosopentech.com","https://libretranslate.de","https://translate.mentality.rip"];
-  for(const x of defaults) if(!arr.includes(x)) arr.push(x); return arr;
+function getTranslationDType(device) {
+  // q4 is substantially smaller on WebGPU; q8 is the safer CPU choice.
+  return device === "webgpu" ? "q4" : "q8";
+}
+function translationProgress(info) {
+  const wrap=$("translateModelProgressWrap"), bar=$("translateModelProgressBar"), txt=$("translateModelProgressText");
+  if (!wrap || !bar || !txt) return;
+  wrap.classList.remove("hidden");
+  if (typeof info?.progress === "number") bar.style.width=Math.max(0,Math.min(100,info.progress))+"%";
+  const file=info?.file ? String(info.file).split("/").pop() : "";
+  if (info?.status === "progress") txt.textContent=`Mengunduh model… ${Math.round(info.progress||0)}%${file?" · "+file:""}`;
+  else if (info?.status === "initiate") txt.textContent=`Menyiapkan ${file||"model"}…`;
+  else if (info?.status === "done") txt.textContent=`Selesai memuat ${file||"model"}.`;
+  else if (info?.status === "ready") txt.textContent="Model siap.";
+  else if (info?.status === "download") txt.textContent=`Mengunduh ${file||"model"}…`;
 }
 function maskPlaceholders(text) {
-  const map=[]; const masked=text.replace(/\[%[^\]]+\]/g, m=>{const n=map.length;map.push(m);return `__LTC_PH_${n}__`;});
+  const map=[];
+  const masked=text.replace(/\[%[^\]]+\]/g,m=>{const n=map.length;map.push(m);return ` LTCPLACEHOLDER${n} `;});
   return {masked,map};
 }
 function restorePlaceholders(text,map) {
-  for(let i=0;i<map.length;i++) { const token=`__LTC_PH_${i}__`; if(!text.includes(token)) return null; text=text.split(token).join(map[i]); }
+  for(let i=0;i<map.length;i++) {
+    const exact=`LTCPLACEHOLDER${i}`;
+    const re=new RegExp(`\\bLTC\\s*PLACEHOLDER\\s*${i}\\b|\\bLTCPLACEHOLDER${i}\\b|\\[\\[?\\s*LTCPLACEHOLDER${i}\\s*\\]?\\]`,"gi");
+    if(!re.test(text)) return null;
+    text=text.replace(re,map[i]);
+  }
   return text;
 }
 function shouldTranslateText(text) {
-  const t=text.trim(); if(!t) return false;
-  if(t.length<2) return false;
+  const t=text.trim(); if(!t || t.length<2) return false;
   if(!/[A-Za-z]/.test(t)) return false;
-  // Skip obvious technical/code-only strings.
   if(/^(https?:\/\/|www\.|[A-Z0-9_./:-]+$)/.test(t) && !/\s/.test(t)) return false;
-  if(/^[%$#@{}<>\[\]()+*=0-9._\-\/\\]+$/.test(t)) return false;
+  if(/^[%$#@{}<>\[\]()+=*0-9._\-\/\\]+$/.test(t)) return false;
+  // Skip very obvious file/code identifiers.
+  if(/^(?:[a-zA-Z]:\\|[a-zA-Z0-9_.-]+\.(?:png|jpg|jpeg|xml|json|ini|cfg|dat|ltc))$/i.test(t)) return false;
   return true;
 }
 function normalizeForMemory(text) { return text.replace(/\s+/g," ").trim(); }
-function splitBatchText(items) {
-  const parts=[]; const sep=(n)=>`\n\n__LTC_ITEM_${n}_END__\n\n`;
-  for(let n=0;n<items.length;n++){ const m=maskPlaceholders(items[n].text).masked.replace(/\r?\n/g," __LTC_NL__ "); parts.push(m+sep(n)); }
-  return parts.join("");
+async function loadLocalTranslator() {
+  if (state.translator) return state.translator;
+  if (state.translatorLoading) return state.translatorLoading;
+  if (!transformersReady) throw new Error("Library AI browser gagal dimuat.");
+  const model=$("translateModel")?.value || TRANSFORMERS_MODEL;
+  const device=getTranslationDevice();
+  const dtype=getTranslationDType(device);
+  state.translatorDevice=device; state.translatorModel=model; state.translatorLoading=(async()=>{
+    $("translateLoadBtn").disabled=true;
+    $("translateModelProgressWrap").classList.remove("hidden");
+    $("translateModelProgressBar").style.width="0%";
+    $("translateModelProgressText").textContent=`Menyiapkan AI lokal (${device.toUpperCase()}, ${dtype})…`;
+    try {
+      let usedDevice=device, usedDtype=dtype;
+      let pipe;
+      try {
+        pipe=await pipeline("translation", model, {
+          device:usedDevice, dtype:usedDtype,
+          progress_callback: translationProgress,
+        });
+      } catch(firstError) {
+        // Auto mode should still work on phones where WebGPU is present but unstable.
+        if ($("translateDevice")?.value === "auto" && usedDevice === "webgpu") {
+          $("translateModelProgressText").textContent="WebGPU gagal, beralih ke CPU/WASM…";
+          usedDevice="wasm"; usedDtype="q8";
+          pipe=await pipeline("translation", model, {
+            device:usedDevice, dtype:usedDtype,
+            progress_callback: translationProgress,
+          });
+        } else throw firstError;
+      }
+      state.translatorDevice=usedDevice; state.translator=pipe;
+      $("translateModelProgressBar").style.width="100%";
+      $("translateModelProgressText").textContent=`Model siap · ${usedDevice.toUpperCase()} · ${usedDtype}`;
+      $("translateLoadBtn").textContent="✓ Model Siap";
+      toast(`AI lokal siap · ${usedDevice.toUpperCase()}`);
+      return pipe;
+    } catch(e) {
+      state.translator=null;
+      $("translateLoadBtn").disabled=false;
+      $("translateLoadBtn").textContent="⬇ Muat Model";
+      $("translateModelProgressText").textContent=`Gagal memuat model: ${e.message}`;
+      throw e;
+    } finally { state.translatorLoading=null; }
+  })();
+  return state.translatorLoading;
 }
-function parseBatchText(raw, items) {
-  const outputs=[];
-  for(let n=0;n<items.length;n++){
-    const marker=`__LTC_ITEM_${n}_END__`; const pos=raw.indexOf(marker);
-    if(pos<0) return null;
-    let start= n===0 ? 0 : raw.lastIndexOf(`__LTC_ITEM_${n-1}_END__`,pos)+(`__LTC_ITEM_${n-1}_END__`).length;
-    let val=raw.slice(start,pos).trim().replace(/__LTC_NL__/g,"\n");
-    const restored=restorePlaceholders(val,items[n].placeholders);
-    if(restored===null) return null;
-    outputs.push(restored);
+function prepareForTranslation(text) {
+  const {masked,map}=maskPlaceholders(text);
+  // Preserve newlines as a stable token so the model cannot collapse them unpredictably.
+  return {masked:masked.replace(/\r?\n/g," LTCNEWLINE "), map};
+}
+function restoreTranslation(text,map) {
+  let out=text.replace(/\bLTCNEWLINE\b/gi,"\n");
+  const restored=restorePlaceholders(out,map);
+  return restored===null ? null : restored.replace(/[ \t]+\n/g,"\n").trim();
+}
+async function translateBatchLocal(items) {
+  const pipe=await loadLocalTranslator();
+  const prepared=items.map(item=>({item,...prepareForTranslation(item.text)}));
+  const inputs=prepared.map(x=>x.masked);
+  let result;
+  try {
+    result=await pipe(inputs,{max_new_tokens:128,num_beams:2});
+  } catch(e) {
+    // Some runtimes are more reliable with one input at a time.
+    result=[];
+    for(const x of prepared) result.push(...await pipe([x.masked],{max_new_tokens:128,num_beams:2}));
   }
-  return outputs;
+  const arr=Array.isArray(result)?result:[result];
+  if(arr.length!==prepared.length) throw new Error(`Model mengembalikan ${arr.length} hasil untuk ${prepared.length} teks.`);
+  return arr.map((r,i)=>{
+    const raw=typeof r==="string"?r:r?.translation_text;
+    if(!raw) throw new Error("Model tidak mengembalikan teks terjemahan.");
+    const restored=restoreTranslation(raw,prepared[i].map);
+    if(restored===null) throw new Error(`Placeholder pada string #${prepared[i].item.indices[0]+1} tidak dapat dipertahankan.`);
+    return restored;
+  });
 }
-async function callTranslate(endpoint, text) {
-  const key=$("translateApiKey")?.value?.trim() || "";
-  const res=await fetch(endpoint+"/translate",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({q:text,source:"en",target:"id",format:"text",...(key?{api_key:key}:{})})});
-  if(!res.ok) throw new Error(`${res.status} ${res.statusText}`);
-  const data=await res.json(); if(!data.translatedText) throw new Error("Server tidak mengembalikan translatedText");
-  return data.translatedText;
-}
-async function testTranslationServer() {
-  const endpoints=translationCandidates(); let last="";
-  for(const ep of endpoints){ try { const out=await callTranslate(ep,"Hello, this is a test."); if(out){ state.translationEndpoint=ep; toast(`Server siap: ${ep}`); return true; } } catch(e){last=e.message;} }
-  toast(`Server gratis tidak merespons: ${last||"gagal"}`); return false;
+async function testLocalTranslation() {
+  try {
+    const pipe=await loadLocalTranslator();
+    const samples=["Hello, this is a test.","Are you sure you want to continue?","Manager","Transfer budget"];
+    const result=await pipe(samples,{max_new_tokens:64,num_beams:2});
+    const lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
+    $("translateStats").textContent="Tes model berhasil:\n"+lines;
+    toast("Tes AI lokal berhasil");
+  } catch(e) { console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal memuat/menjalankan model: ${e.message}`; }
 }
 async function buildTranslationQueue() {
   const mode=$("translateMode")?.value||"all"; let indices=[];
   if(mode==="page") indices=pageItems();
   else { const limit=mode==="1000"?1000:Infinity; for(let i=0;i<state.indexCount && indices.length<limit;i++) indices.push(i); }
-  const unique=new Map(); const queue=[]; let cached=0, skipped=0;
+  const unique=new Map(), queue=[]; let cached=0, skipped=0;
+  const useCache=$("translateUseCache")?.checked!==false;
   for(const i of indices){
     const text=decodeAt(i); if(!shouldTranslateText(text)){skipped++;continue;}
     if(state.dirty.has(i)) { skipped++; continue; }
-    const norm=normalizeForMemory(text); const key=hashText(norm); const cachedVal=await getTranslationCache(key);
-    if(cachedVal){ state.dirty.set(i,cachedVal); cached++; continue; }
+    const norm=normalizeForMemory(text), key=hashText(norm);
+    if(useCache){ const cachedVal=await getTranslationCache(key); if(cachedVal){state.dirty.set(i,cachedVal);cached++;continue;} }
     if(unique.has(key)) unique.get(key).indices.push(i);
-    else { const ph=placeholders(text); const item={key,text,placeholders:ph,indices:[i]}; unique.set(key,item); queue.push(item); }
+    else { const item={key,text,indices:[i]}; unique.set(key,item); queue.push(item); }
     if((i&255)===0) await new Promise(r=>setTimeout(r,0));
   }
   return {queue,cached,skipped,total:indices.length};
 }
-async function translateItemBatch(items, endpoint) {
-  const prepared=items.map(x=>({...x,placeholders:x.placeholders}));
-  const payload=splitBatchText(prepared);
-  try { const raw=await callTranslate(endpoint,payload); const parsed=parseBatchText(raw,prepared); if(parsed) return parsed; } catch(e) { throw e; }
-  // If a server mangles separators, retry each item separately. This is slower but safe.
-  const outputs=[];
-  for(const item of prepared){
-    const masked=maskPlaceholders(item.text); const raw=await callTranslate(endpoint,masked.masked.replace(/\r?\n/g," __LTC_NL__ ")); const restored=restorePlaceholders(raw.replace(/__LTC_NL__/g,"\n"),masked.map); if(restored===null) throw new Error("Placeholder rusak oleh mesin terjemahan"); outputs.push(restored); await new Promise(r=>setTimeout(r,250));
-  }
-  return outputs;
-}
 async function startTranslation() {
   if(state.translationRunning || !state.original) return;
-  state.translationPaused=false; state.translationRunning=true; $("translateStartBtn").disabled=true; $("translatePauseBtn").disabled=false;
+  state.translationPaused=false; state.translationRunning=true;
+  $("translateStartBtn").disabled=true; $("translatePauseBtn").disabled=false;
   $("translateProgressWrap").classList.remove("hidden");
   try {
+    await loadLocalTranslator();
     const plan=await buildTranslationQueue(); state.translationQueue=plan.queue; state.translationTotal=plan.queue.length; state.translationDone=0;
     $("translateStats").textContent=`Antrian unik: ${plan.queue.length.toLocaleString("id-ID")} · cache: ${plan.cached.toLocaleString("id-ID")} · dilewati: ${plan.skipped.toLocaleString("id-ID")}`;
     if(!plan.queue.length){ refreshPageOffsets(); toast("Tidak ada string baru yang perlu diterjemahkan"); return; }
-    const batchSize=Number($("translateBatch").value)||10; let cursor=0; let endpoints=translationCandidates(); let epIndex=Math.max(0,endpoints.indexOf(state.translationEndpoint));
+    const batchSize=Math.max(1,Math.min(4,Number($("translateBatch").value)||2)); let cursor=0;
     while(cursor<plan.queue.length){
       if(state.translationPaused){ toast("Terjemahan dijeda"); return; }
-      const batch=plan.queue.slice(cursor,cursor+batchSize); let done=false, lastErr="";
-      for(let tries=0;tries<endpoints.length && !done;tries++){
-        const ep=endpoints[(epIndex+tries)%endpoints.length];
-        try { const outputs=await translateItemBatch(batch,ep); for(let j=0;j<batch.length;j++){const item=batch[j], out=outputs[j].trim(); await putTranslationCache(item.key,out); for(const idx of item.indices) state.dirty.set(idx,out);} state.translationEndpoint=ep; done=true; } catch(e){ lastErr=e.message; }
+      const batch=plan.queue.slice(cursor,cursor+batchSize);
+      const outputs=await translateBatchLocal(batch);
+      for(let j=0;j<batch.length;j++){
+        const item=batch[j], out=outputs[j].trim();
+        if($("translateUseCache")?.checked!==false) await putTranslationCache(item.key,out);
+        for(const idx of item.indices) state.dirty.set(idx,out);
       }
-      if(!done) throw new Error(`Semua server gratis gagal: ${lastErr}`);
-      cursor+=batch.length; state.translationDone=cursor; const pct=Math.floor(cursor/plan.queue.length*100); $("translateProgressBar").style.width=pct+"%"; $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%`;
-      refreshPageOffsets(); await new Promise(r=>setTimeout(r,350));
+      cursor+=batch.length; state.translationDone=cursor;
+      const pct=Math.floor(cursor/plan.queue.length*100);
+      $("translateProgressBar").style.width=pct+"%";
+      $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%`;
+      refreshPageOffsets(); await new Promise(r=>setTimeout(r,0));
     }
     toast(`Terjemahan selesai · ${plan.queue.length.toLocaleString("id-ID")} teks unik`);
   } catch(e){ console.error(e); toast(`Terjemahan berhenti: ${e.message}`); $("translateProgressText").textContent=e.message; }
-  finally { state.translationRunning=false; $("translateStartBtn").disabled=!state.original; $("translatePauseBtn").disabled=true; }
+  finally { state.translationRunning=false; $("translateStartBtn").disabled=!state.original || !state.translator; $("translatePauseBtn").disabled=true; }
 }
 function pauseTranslation(){ if(state.translationRunning){state.translationPaused=true; $("translatePauseBtn").disabled=true;} }
-function updateTranslationUI(){ const ok=!!state.original; $("translateStartBtn").disabled=!ok || state.translationRunning; $("translateTestBtn").disabled=!ok || state.translationRunning; $("translateClearCacheBtn").disabled=!ok || state.translationRunning; }
+function updateTranslationUI(){
+  const ok=!!state.original;
+  $("translateLoadBtn").disabled=!ok || !!state.translator || !!state.translatorLoading;
+  $("translateTestBtn").disabled=!ok || !!state.translatorLoading;
+  $("translateStartBtn").disabled=!ok || !state.translator || state.translationRunning;
+  $("translateClearCacheBtn").disabled=!ok || state.translationRunning;
+}
 
 function downloadBytes(bytes, name) {
   const blob = new Blob([bytes], {type:"application/octet-stream"}), a = document.createElement("a");
@@ -689,9 +781,10 @@ function jumpPage() {
   goPage(n - 1); $("pageJump").value = "";
 }
 
-$("translateEndpoint").addEventListener("change", e => { if(e.target.value!=="custom") state.translationEndpoint=e.target.value; $("customEndpointWrap").classList.toggle("hidden",e.target.value!=="custom"); });
-$("translateSettingsBtn").addEventListener("click", () => { $("customEndpointWrap").classList.toggle("hidden"); });
-$("translateTestBtn").addEventListener("click", testTranslationServer);
+$("translateSettingsBtn").addEventListener("click", () => { $("translateSettingsExtra").classList.toggle("hidden"); });
+$("translateDevice").addEventListener("change", () => { if(state.translator){ toast("Perangkat berubah. Muat ulang model untuk memakai mode baru."); } });
+$("translateLoadBtn").addEventListener("click", async()=>{ try { await loadLocalTranslator(); updateTranslationUI(); } catch(e){ updateTranslationUI(); } });
+$("translateTestBtn").addEventListener("click", testLocalTranslation);
 $("translateStartBtn").addEventListener("click", startTranslation);
 $("translatePauseBtn").addEventListener("click", pauseTranslation);
 $("translateClearCacheBtn").addEventListener("click", async()=>{ if(confirm("Hapus semua cache terjemahan yang tersimpan di browser?")){await clearTranslationCache(); toast("Cache terjemahan dihapus");} });
