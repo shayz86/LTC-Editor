@@ -332,7 +332,8 @@ async function buildFileAsync(onProgress) {
   let delta = 0;
   for (const [i, text] of changed) delta += enc.encode(text).length - state.lengths[i];
   const newIndexStart = oldIndexStart + delta;
-  const newSize = newIndexStart + state.indexCount * 9 + 4;
+  // The output must be exactly original size + total UTF-8 byte delta.
+  const newSize = old.byteLength + delta;
   const out = new Uint8Array(newSize);
   const outView = new DataView(out.buffer);
 
@@ -395,9 +396,14 @@ async function buildFileAsync(onProgress) {
   }
 
   // Preserve the original 4-byte zero footer.
-  out.set(old.subarray(oldIndexStart + state.indexCount * 9, oldIndexStart + state.indexCount * 9 + 4), outPos);
-  outPos += 4;
-  if (outPos !== out.length) throw new Error(`Ukuran hasil tidak konsisten: ${outPos} / ${out.length}`);
+  const oldFooterStart = oldIndexStart + state.indexCount * 9;
+  const footer = old.subarray(oldFooterStart, oldFooterStart + 4);
+  if (footer.length !== 4) throw new Error("Footer LTC asli tidak lengkap.");
+  out.set(footer, outPos);
+  outPos += footer.length;
+  if (outPos !== out.length) {
+    throw new Error(`Ukuran hasil tidak konsisten: ${outPos} / ${out.length} (delta ${delta}, index baru ${newIndexStart})`);
+  }
   onProgress?.(100, state.indexCount);
   return out;
 }
@@ -451,6 +457,19 @@ function validateBuiltFile(bytes) {
   if (lastMarker + 5 + view.getUint32(lastMarker + 1, true) > countPos) return false;
   return view.getUint32(idx + state.indexCount * 9, true) === 0;
 }
+async function verifyRoundTrip(bytes) {
+  const parsed = await buildIndexAsync(bytes, null);
+  if (parsed.indexCount !== state.indexCount) throw new Error("Round-trip: jumlah string berubah.");
+  for (let i = 0; i < state.indexCount; i++) {
+    if (parsed.ids[i] !== state.indexIds[i]) throw new Error(`Round-trip: ID string #${i + 1} berubah.`);
+    if (parsed.flags[i] !== state.indexFlags[i]) throw new Error(`Round-trip: flag string #${i + 1} berubah.`);
+    const expected = decodeAt(i);
+    const got = dec.decode(new Uint8Array(bytes.buffer, bytes.byteOffset + parsed.textOffsets[i], parsed.lengths[i]));
+    if (got !== expected) throw new Error(`Round-trip: isi string #${i + 1} berubah.`);
+  }
+  return true;
+}
+
 function downloadBytes(bytes, name) {
   const blob = new Blob([bytes], {type:"application/octet-stream"}), a = document.createElement("a");
   a.href = URL.createObjectURL(blob); a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -466,6 +485,8 @@ async function saveFile() {
   try {
     const out = await buildFileAsync((pct) => { $("progressBar").style.width = `${pct}%`; $("progressText").textContent = `Membangun LTC aman… ${pct}%`; });
     if (!validateBuiltFile(out)) throw new Error("Validasi struktur hasil gagal.");
+    $("progressText").textContent = "Memeriksa ulang file hasil…";
+    await verifyRoundTrip(out);
     const base = state.fileName.replace(/\.ltc$/i, "");
     downloadBytes(out, `${base}_edited.ltc`);
     toast(`LTC valid disimpan · ${state.dirty.size} string diubah · ${out.byteLength.toLocaleString("id-ID")} byte`);
