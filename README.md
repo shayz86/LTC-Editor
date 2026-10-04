@@ -1,4 +1,4 @@
-# LTC Editor FM2011 — Mobile v7 — Safe Rebuild
+# LTC Editor FM2011 — Mobile v8 — Save Fix
 
 Editor `.ltc` Football Manager 2011 yang dioptimalkan untuk browser Android.
 

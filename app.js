@@ -332,7 +332,7 @@ async function buildFileAsync(onProgress) {
   let delta = 0;
   for (const [i, text] of changed) delta += enc.encode(text).length - state.lengths[i];
   const newIndexStart = oldIndexStart + delta;
-  const newSize = newIndexStart + 4 + state.indexCount * 9 + 4;
+  const newSize = newIndexStart + state.indexCount * 9 + 4;
   const out = new Uint8Array(newSize);
   const outView = new DataView(out.buffer);
 
@@ -395,7 +395,7 @@ async function buildFileAsync(onProgress) {
   }
 
   // Preserve the original 4-byte zero footer.
-  out.set(old.subarray(oldIndexStart + 4 + state.indexCount * 9, oldIndexStart + 4 + state.indexCount * 9 + 4), outPos);
+  out.set(old.subarray(oldIndexStart + state.indexCount * 9, oldIndexStart + state.indexCount * 9 + 4), outPos);
   outPos += 4;
   if (outPos !== out.length) throw new Error(`Ukuran hasil tidak konsisten: ${outPos} / ${out.length}`);
   onProgress?.(100, state.indexCount);
@@ -428,7 +428,7 @@ function validateBuiltFile(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (bytes.length < 60 || bytes[0] !== 0x03 || bytes[1] !== 0x01 || bytes[2] !== 0x63 || bytes[3] !== 0x74 || bytes[4] !== 0x6c || bytes[5] !== 0x2e) return false;
   const idx = view.getUint32(8, true) + 12;
-  if (idx < 57 || idx + 4 + state.indexCount * 9 + 4 !== bytes.length) return false;
+  if (idx < 57 || idx + state.indexCount * 9 + 4 !== bytes.length) return false;
   const countPos = idx - 4;
   if (view.getUint32(countPos, true) !== state.indexCount) return false;
   const prefix = cumulativeDeltaForIndex.prefix || buildDeltaPrefix();
