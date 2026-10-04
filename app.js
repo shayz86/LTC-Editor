@@ -9,7 +9,8 @@ const state = {
   selected: -1, page: 0, pageSize: 20,
   filter: "", caseSensitive: false, placeholdersOnly: false,
   dirty: new Map(), lastResults: [], searchMode: false,
-  searchToken: 0, indexing: false
+  searchToken: 0, indexing: false,
+  translation: { running:false, paused:false, done:0, total:0, errors:0, key:"", model:"gemini-3.8-flash", batch:20 }
 };
 
 const enc = new TextEncoder();
@@ -496,6 +497,143 @@ async function saveFile() {
   } catch (e) { console.error(e); toast(`Gagal membuat LTC: ${e.message}`); }
   finally { $("progressWrap").classList.add("hidden"); saveBtn.disabled = false; }
 }
+
+// ---------- AI translation (optional, user-supplied Gemini key) ----------
+const TRANSLATE_KEY_STORAGE = "ltc-gemini-settings-v12";
+function loadTranslateSettings(){
+  try{
+    const x=JSON.parse(localStorage.getItem(TRANSLATE_KEY_STORAGE)||"{}");
+    $("geminiKey").value=x.key||"";
+    $("geminiModel").value=x.model||"gemini-3.8-flash";
+    $("translateBatch").value=String(x.batch||20);
+    $("autoTranslate").checked=!!x.auto;
+    state.translation.key=x.key||""; state.translation.model=x.model||"gemini-3.8-flash"; state.translation.batch=Number(x.batch)||20;
+  }catch(e){}
+}
+function saveTranslateSettings(){
+  const key=$("geminiKey").value.trim(), model=$("geminiModel").value.trim()||"gemini-3.8-flash", batch=Number($("translateBatch").value)||20, auto=$("autoTranslate").checked;
+  state.translation.key=key; state.translation.model=model; state.translation.batch=batch;
+  localStorage.setItem(TRANSLATE_KEY_STORAGE, JSON.stringify({key,model,batch,auto}));
+  toast(key?"Pengaturan AI disimpan di browser":"API key dikosongkan");
+}
+function translationCandidates(){
+  const arr=[];
+  for(let i=0;i<state.indexCount;i++){
+    if(state.dirty.has(i)) continue;
+    const text=originalTextAt(i);
+    if(!/[A-Za-z]/.test(text)) continue;
+    if(text.trim().length<2) continue;
+    arr.push(i);
+  }
+  return arr;
+}
+function protectText(text){
+  const tokens=[];
+  const protectedText=text.replace(/(\[%[^\]]+\]|%[A-Za-z][A-Za-z0-9_#.-]*(?:\[[^\]]*\])?|\{[^{}]+\})/g,m=>{
+    const token=`___LTC_TOKEN_${tokens.length}___`;
+    tokens.push(m); return token;
+  });
+  return {text:protectedText,tokens};
+}
+function restoreProtected(text,tokens){
+  for(let i=0;i<tokens.length;i++){
+    const token=`___LTC_TOKEN_${i}___`;
+    if(!text.includes(token)) throw new Error(`Placeholder hilang: ${tokens[i]}`);
+    text=text.split(token).join(tokens[i]);
+  }
+  return text;
+}
+function translationPrompt(items){
+  return `You are translating Football Manager 2011 English language strings into natural Indonesian.
+Rules:
+- Translate English words and sentences into natural Indonesian, suitable for an Indonesian football management game.
+- Keep the meaning and tone. Do not add explanations.
+- Preserve every token like ___LTC_TOKEN_0___ exactly, character-for-character, and keep their relative position as appropriate.
+- Preserve line breaks and punctuation unless Indonesian grammar requires a harmless adjustment.
+- Do not translate proper names, player names, club names, competition names, abbreviations, codes, or technical identifiers unless they are clearly ordinary English words.
+- Return ONLY a JSON array of objects with fields id and text. Keep every id exactly.
+
+INPUT:
+${JSON.stringify(items)}`;
+}
+async function callGeminiTranslation(items){
+  const key=state.translation.key||$("geminiKey").value.trim();
+  const model=state.translation.model||$("geminiModel").value.trim()||"gemini-3.8-flash";
+  if(!key) throw new Error("API key Gemini belum diisi.");
+  const payload={
+    contents:[{role:"user",parts:[{text:translationPrompt(items)}]}],
+    generationConfig:{responseMimeType:"application/json",responseSchema:{type:"array",items:{type:"object",properties:{id:{type:"integer"},text:{type:"string"}},required:["id","text"]}}}
+  };
+  let last="";
+  for(let attempt=0;attempt<3;attempt++){
+    try{
+      const res=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+        method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify(payload)
+      });
+      const raw=await res.text();
+      if(!res.ok) throw new Error(`Gemini HTTP ${res.status}: ${raw.slice(0,300)}`);
+      const data=JSON.parse(raw);
+      const txt=data?.candidates?.[0]?.content?.parts?.map(p=>p.text||"").join("")||"";
+      if(!txt) throw new Error("Gemini tidak mengembalikan teks.");
+      const parsed=JSON.parse(txt);
+      if(!Array.isArray(parsed)) throw new Error("Respons terjemahan bukan array JSON.");
+      return parsed;
+    }catch(e){ last=e.message||String(e); if(attempt<2) await new Promise(r=>setTimeout(r,1500*(attempt+1))); }
+  }
+  throw new Error(last||"Gagal menghubungi Gemini.");
+}
+function setTranslationUI(){
+  const t=state.translation, bar=$("translateBar"), status=$("translateStatus"), all=$("translateAllBtn"), pause=$("pauseTranslateBtn");
+  if(!state.original){all.disabled=true; pause.disabled=true; status.textContent="Belum ada file."; bar.style.width="0%"; return;}
+  all.disabled=t.running||!t.key; pause.disabled=!t.running;
+  const pct=t.total?Math.min(100,(t.done/t.total)*100):0; bar.style.width=`${pct}%`;
+  status.textContent=t.running?`Menerjemahkan ${t.done.toLocaleString("id-ID")} / ${t.total.toLocaleString("id-ID")} · error ${t.errors}`:`${t.done.toLocaleString("id-ID")} / ${t.total.toLocaleString("id-ID")} selesai · error ${t.errors}`;
+}
+async function translateAll(){
+  if(!state.original) return toast("Buka LTC terlebih dahulu");
+  if(state.translation.running) return;
+  saveTranslateSettings();
+  if(!state.translation.key) return toast("Masukkan Gemini API Key terlebih dahulu");
+  const candidates=translationCandidates();
+  state.translation.running=true; state.translation.paused=false; state.translation.done=0; state.translation.errors=0; state.translation.total=candidates.length; setTranslationUI();
+  toast(`Mulai menerjemahkan ${candidates.length.toLocaleString("id-ID")} string…`);
+  try{
+    for(let pos=0;pos<candidates.length;pos+=state.translation.batch){
+      if(state.translation.paused) break;
+      const ids=candidates.slice(pos,pos+state.translation.batch);
+      const items=ids.map(id=>{const p=protectText(originalTextAt(id)); return {id,text:p.text};});
+      try{
+        const result=await callGeminiTranslation(items);
+        const byId=new Map(result.map(x=>[Number(x.id),String(x.text??"")]));
+        for(const id of ids){
+          const original=originalTextAt(id), protectedInfo=protectText(original), out=byId.get(id);
+          if(typeof out!=="string") throw new Error(`String #${id+1} tidak ada dalam respons Gemini.`);
+          const restored=restoreProtected(out,protectedInfo.tokens);
+          if(!restored.trim()) throw new Error(`String #${id+1} menghasilkan terjemahan kosong.`);
+          if(restored!==original) state.dirty.set(id,restored);
+        }
+        invalidateDeltaCache();
+        state.translation.done+=ids.length;
+        renderResults(); if(state.selected>=0) selectRecord(state.selected);
+      }catch(e){
+        console.error(e); state.translation.errors+=ids.length; state.translation.done+=ids.length; toast(`Batch gagal: ${e.message}`);
+      }
+      setTranslationUI();
+      await new Promise(r=>setTimeout(r,250));
+    }
+  }finally{
+    state.translation.running=false; setTranslationUI();
+    if(state.translation.paused) toast("Terjemahan dijeda. Tekan Terjemahkan semua untuk melanjutkan yang belum diterjemahkan.");
+    else toast(`Terjemahan selesai: ${state.dirty.size.toLocaleString("id-ID")} string berubah.`);
+  }
+}
+function pauseTranslation(){ if(state.translation.running){state.translation.paused=true; toast("Menjeda setelah batch berjalan selesai…");} }
+function maybeAutoTranslate(){
+  if($("autoTranslate")?.checked && state.translation.key && state.original){
+    setTimeout(()=>translateAll(),700);
+  }
+}
+
 function resetEditor() {
   state.selected=-1; state.dirty.clear(); $("editorText").value=""; $("editorText").disabled=true; $("applyBtn").disabled=true;
   $("prevBtn").disabled=true; $("nextBtn").disabled=true; $("dirtyBadge").classList.add("hidden"); $("recordTitle").textContent="Belum ada string dipilih";
@@ -520,6 +658,7 @@ async function loadFile(file, fromCache=false) {
       // Always show the first sequential page immediately after indexing.
       state.searchMode=false; state.lastResults=[]; state.page=0; renderResults();
       toast(fromCache ? `LTC dipulihkan · ${state.markers.length.toLocaleString("id-ID")} string` : `LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
+      setTranslationUI(); maybeAutoTranslate();
     } catch(e) {
       console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden");
       state.original=null; state.markers=[]; state.textOffsets=[]; state.lengths=[]; state.indexStart=0; state.indexCount=0; state.indexIds=[]; state.indexFlags=[]; invalidateDeltaCache(); state.page=0; state.searchMode=false; state.lastResults=[];
@@ -565,6 +704,14 @@ $("pageSize").addEventListener("change", e => changePageSize(e.target.value));
 $("pageJumpBtn").addEventListener("click", jumpPage); $("pageJump").addEventListener("keydown", e => { if(e.key === "Enter") jumpPage(); });
 $("themeBtn").addEventListener("click", () => { document.body.classList.toggle("light"); localStorage.setItem("ltc-theme", document.body.classList.contains("light")?"light":"dark"); });
 if(localStorage.getItem("ltc-theme")==="light") document.body.classList.add("light");
+loadTranslateSettings();
+$("translateSettingsBtn").addEventListener("click",()=>$("translateSettings").classList.toggle("hidden"));
+$("saveGeminiKey").addEventListener("click",saveTranslateSettings);
+$("translateAllBtn").addEventListener("click",translateAll);
+$("pauseTranslateBtn").addEventListener("click",pauseTranslation);
+$("geminiModel").addEventListener("change",()=>{state.translation.model=$("geminiModel").value.trim()||"gemini-3.8-flash";});
+$("translateBatch").addEventListener("change",()=>{state.translation.batch=Number($("translateBatch").value)||20;});
+setTranslationUI();
 restoreCachedFile();
 window.addEventListener("beforeunload", e => { if(state.dirty.size){e.preventDefault();e.returnValue="";} });
 })();

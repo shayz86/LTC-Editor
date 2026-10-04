@@ -1,34 +1,29 @@
-# LTC Editor FM2011 — Mobile v11 — Dynamic Index
+# LTC Editor FM2011 Mobile v12 — AI Translate
 
-Editor `.ltc` Football Manager 2011 yang dioptimalkan untuk browser Android.
+Browser-based Football Manager 2011 LTC editor optimized for Android/mobile.
 
-## Fokus v4
-- Pagination 10 / 20 / 50 string per halaman (default 20).
-- Hanya halaman aktif yang dibuat menjadi DOM; tidak menampilkan 178 ribu string sekaligus.
-- Jump ke halaman tertentu.
-- Kalimat lengkap tetap ditampilkan saat string dipilih.
-- Placeholder `[%...]` dipertahankan/diperingatkan jika hilang atau berubah.
-- Jika panjang string berubah, **offset string berikutnya dihitung ulang secara dinamis** berdasarkan akumulasi perubahan byte dari string-string sebelumnya.
-- Saat export, header length record ditulis ulang sesuai panjang UTF-8 terbaru.
-- Byte yang tidak diedit dipertahankan dari file asli.
+## Core LTC features
+- Reads the supplied FM2011 LTC structure: 52-byte header, variable records, record count, 9-byte index entries, 4-byte footer.
+- Keeps original IDs, flags, record markers, and non-indexed gaps.
+- Allows edited UTF-8 strings to become longer or shorter.
+- Rebuilds physical offsets and the LTC index accordingly.
+- Validates the rebuilt file and performs a round-trip parse before download.
 
-## Logika offset
-Jika string #100 bertambah 20 byte, maka offset efektif string #101 dan semua string setelahnya bergeser +20 byte. Jika string #150 kemudian berkurang 5 byte, string #151 dan setelahnya akan menjadi +15 byte dari posisi awal. Perubahan hanya memengaruhi posisi record setelah titik perubahan; string sebelum perubahan tetap pada offset awal.
+## AI translation
+v12 adds optional English → Indonesian translation using the Gemini API directly from the browser.
 
-## Deployment
-Upload isi folder ini ke GitHub Pages atau Cloudflare Pages sebagai static site. Tidak ada server upload: file `.ltc` diproses lokal di browser.
+- Enter your own Gemini API key in the AI settings.
+- Default model: `gemini-3.8-flash`.
+- Translation runs in small batches so the 178,700-string file does not need to be rendered in the DOM.
+- Placeholder-like tokens such as `[%date#1]`, `%club#1-short`, and `{...}` are protected and restored exactly.
+- Proper names, club names, competition names, abbreviations, codes, and technical identifiers are instructed to remain unchanged unless clearly ordinary English words.
+- Manually edited strings are skipped by the automatic translator.
+- Translation is stored as normal LTC edits; use **Simpan / Download** after the translation pass.
+- **Mulai otomatis setelah LTC dibuka** can be enabled. If enabled and a key is saved, translation starts in the background after indexing.
+- Translation uses network/API requests and may consume Gemini quota. 178,700 strings is a large translation job and can take a long time.
 
+## Security
+The API key is stored in the browser's localStorage for convenience. A static GitHub Pages site cannot keep a client-side API key secret. Use a key intended for this local tool, restrict it where possible, and remove it from the app settings when finished.
 
-## FM2011 Safe Rebuild v10
-
-Versi ini menggunakan struktur LTC FM2011 yang terdeteksi pada `english.ltc`: 52-byte header, 178.700 indexed records, 4-byte record count, lalu index 9-byte per record dan footer 4-byte. Saat panjang string berubah, editor membangun ulang record secara berurutan dan memperbarui field offset pada seluruh index setelah perubahan.
-
-Sebelum download, file hasil divalidasi ulang: jumlah record, panjang setiap record, jumlah index, ID index, flags, offset efektif, dan footer harus konsisten. File tanpa perubahan direbuild byte-for-byte identik dengan file asli. Setelah export, V10 juga membuka kembali hasil menggunakan parser yang sama dan membandingkan seluruh ID, flag, panjang, dan isi 178.700 string sebelum file di-download.
-
-**Penting:** jangan gunakan versi lama untuk menguji edit dengan perubahan panjang byte. Gunakan v7 dan simpan backup `english.ltc` asli.
-
-
-## V11 fix
-- Fixes the Android/Chrome save error `First argument to DataView constructor must be an ArrayBuffer`.
-- The LTC parser now accepts both `ArrayBuffer` and `Uint8Array`, including the generated buffer used by round-trip validation.
-- Dynamic-length records and index rebuilding remain unchanged from V10.
+## Deploy
+Upload the project contents to GitHub Pages. No server is required for the LTC editor itself; AI translation requires browser access to the Gemini API.

@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v11 — Save Fix</div>
+    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v12 — AI Translate</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -30,6 +30,23 @@
     </div>
     <div id="fileInfo" class="fileinfo">Belum ada file. Semua pemrosesan dilakukan lokal di browser.</div>
     <div id="progressWrap" class="progress-wrap hidden"><div class="progress-track"><div id="progressBar" class="progress-bar"></div></div><div id="progressText" class="progress-text">Menganalisis file…</div></div>
+  </section>
+
+
+  <section class="translate-card card">
+    <div class="translate-head">
+      <div><strong>🤖 Terjemahan AI Inggris → Indonesia</strong><div class="translate-note">Terjemahkan bertahap di browser. Placeholder seperti <code>[%date#1]</code> dipertahankan.</div></div>
+      <button id="translateSettingsBtn" class="iconbtn" type="button">⚙</button>
+    </div>
+    <div id="translateSettings" class="translate-settings hidden">
+      <label>Gemini API Key<input id="geminiKey" type="password" autocomplete="off" placeholder="Tempel API key Gemini di sini"></label>
+      <label>Model<input id="geminiModel" type="text" value="gemini-3.8-flash" autocomplete="off"></label>
+      <label>Batch<select id="translateBatch"><option value="10">10</option><option value="20" selected>20</option><option value="40">40</option><option value="60">60</option></select></label>
+      <label class="checkline"><input id="autoTranslate" type="checkbox"> Mulai otomatis setelah LTC dibuka</label>
+      <div class="translate-actions"><button id="saveGeminiKey" type="button">Simpan pengaturan</button><button id="translateAllBtn" type="button" disabled>🌐 Terjemahkan semua</button><button id="pauseTranslateBtn" type="button" disabled>⏸ Jeda</button></div>
+      <div class="translate-warning">API key disimpan lokal di browser. Untuk keamanan, gunakan key khusus dan jangan membagikan URL/aplikasi beserta key tersebut.</div>
+    </div>
+    <div class="translate-progress"><div class="progress-track"><div id="translateBar" class="progress-bar"></div></div><div id="translateStatus" class="progress-text">Belum dimulai.</div></div>
   </section>
 
   <section class="workspace">
@@ -97,6 +114,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script src="app.js?v=9"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
