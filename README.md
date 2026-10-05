@@ -1,25 +1,23 @@
-# LTC Editor FM2011 Mobile v15 — Offline AI Translate
+# LTC Editor Football Manager 2021 — Mobile v16
 
-Browser-based editor for Football Manager Touch 2011 `.ltc` language files.
+Browser-based editor for Football Manager 2021 `.ltc` language files.
 
-## What changed in v14
-- Replaces unreliable public LibreTranslate servers with **local browser inference** using Hugging Face Transformers.js + `Xenova/opus-mt-en-id` (MarianMT English → Indonesian).
-- No Gemini API key and no translation server/API quota.
-- Model is downloaded once and reused from the browser cache when supported.
-- WebGPU is used when selected/available; CPU/WASM fallback is available.
-- Quantized model modes: q4 for WebGPU and q8 for CPU/WASM.
-- Batch translation, duplicate-string deduplication, IndexedDB translation cache, pause/resume.
-- Protects LTC `[%...]` placeholders and line breaks during translation.
-- **The validated v11 LTC save/rebuild engine is retained.** IDs/order stay unchanged; physical offsets are rebuilt when byte lengths change.
+## v16 — NLLB-200 + Football Manager glossary
+- Model: `Xenova/nllb-200-distilled-600M` via Transformers.js.
+- English → Indonesian using `eng_Latn` → `ind_Latn`.
+- Runs in the browser with WebGPU when available, with WASM fallback.
+- Uses q4f16 on WebGPU and compact q8/quantized ONNX on WASM; first load still requires a large download.
+- Optional translation quality: Fast (beam 1), Balanced (beam 2), High (beam 4).
+- Full-sentence placeholder pass preserves grammatical context; if a marker is lost, it falls back to safe fragment translation.
+- Exact `[%...]` LTC placeholders are restored byte-for-byte.
+- Football Manager 2021 glossary fixes high-confidence terms such as `first leg` → `leg pertama`.
+- Placeholder-aware grammar rules handle common `stadium`, `date`, and `time` variables (`di`, `pada`, `pukul`).
+- IndexedDB cache, duplicate-string deduplication, pause/resume, page/1000/all modes.
+- The validated v11 LTC save/rebuild engine is retained. IDs/order remain unchanged; physical offsets are rebuilt when translated byte lengths change.
 
 ## Important
-The first model load requires an internet connection to Hugging Face/CDN. After the model and browser cache are available, translation inference itself runs locally in the browser. The MarianMT model is around the hundreds-of-MB scale, so the first load can be large; quantized variants reduce the download substantially.
+The NLLB model is hosted on Hugging Face and downloaded on first use. Transformers.js then runs inference locally in the browser. WebGPU can accelerate inference where supported; WASM is the compatibility fallback. Hugging Face lists this model as a 196-language NLLB translation model with ONNX weights for Transformers.js and currently provides quantized ONNX variants.
 
-The tool does not guarantee that every machine-translated Football Manager sentence is stylistically perfect. Review/polish the Indonesian result before saving.
+The model is licensed CC-BY-NC-4.0; check that license if you plan to distribute the model or use the project commercially.
 
-Model reference: `Xenova/opus-mt-en-id`.
-
-
-## v15 placeholder fix
-
-Versi ini memperbaiki kegagalan pada string yang mengandung placeholder `[%...]`. Placeholder tidak lagi diganti dengan token buatan yang bisa diubah/dihilangkan model AI. Teks dipecah tepat di sekitar placeholder, bagian bahasa diterjemahkan, lalu placeholder asli dikembalikan pada posisi semula.
+This tool is an unofficial editor/translation utility and is not affiliated with Sports Interactive or SEGA.

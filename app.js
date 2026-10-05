@@ -14,17 +14,17 @@ const state = {
   searchToken: 0, indexing: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
   translationCache: new Map(), translationQueue: [], translationDb: null,
-  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id"
+  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/nllb-200-distilled-600M"
 };
 
 const enc = new TextEncoder();
 
 // Keep a local copy so an Android/Chrome reload or renderer recovery does not leave
 // the UI showing stale file information while the in-memory index is gone.
-const DB_NAME = "ltc-editor-fm2011";
+const DB_NAME = "ltc-editor-fm2021";
 const DB_STORE = "files";
 const DB_KEY = "last-file";
-const TDB_NAME = "ltc-editor-fm2011-translations";
+const TDB_NAME = "ltc-editor-fm2021-translations";
 const TDB_STORE = "translations";
 function openTranslationDB() {
   return new Promise((resolve, reject) => {
@@ -110,7 +110,7 @@ async function buildIndexAsync(buffer, onProgress) {
   // the generated Uint8Array directly; DataView requires an ArrayBuffer.
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  // Exact FM2011 LTC layout observed in the supplied file:
+  // Exact FM2021 LTC layout observed in the supplied file:
   //   52-byte header
   //   178700 variable records: marker(1) + uint32le byteLength + UTF-8 text
   //   uint32 record count
@@ -119,7 +119,7 @@ async function buildIndexAsync(buffer, onProgress) {
   // Header DWORD at offset 8 stores (indexStart - 12).
   if (bytes.length < 60 || bytes[0] !== 0x03 || bytes[1] !== 0x01 ||
       bytes[2] !== 0x63 || bytes[3] !== 0x74 || bytes[4] !== 0x6c || bytes[5] !== 0x2e) {
-    throw new Error("Bukan struktur FM2011 LTC yang dikenali.");
+    throw new Error("Bukan struktur FM2021 LTC yang dikenali.");
   }
 
   const headerIndexValue = view.getUint32(8, true);
@@ -504,10 +504,10 @@ async function verifyRoundTrip(bytes) {
   return true;
 }
 
-// ---------- Offline AI bulk translation (Transformers.js / MarianMT) ----------
+// ---------- Offline AI bulk translation (Transformers.js / NLLB-200) ----------
 // The model is hosted on Hugging Face and executed locally in the browser via ONNX.
 // Transformers.js supports browser-side translation and quantized dtypes for smaller downloads.
-const TRANSFORMERS_MODEL = "Xenova/opus-mt-en-id";
+const TRANSFORMERS_MODEL = "Xenova/nllb-200-distilled-600M";
 let transformersReady = true;
 try {
   env.allowRemoteModels = true;
@@ -522,8 +522,9 @@ function getTranslationDevice() {
   return navigator.gpu ? "webgpu" : "wasm";
 }
 function getTranslationDType(device) {
-  // q4 is substantially smaller on WebGPU; q8 is the safer CPU choice.
-  return device === "webgpu" ? "q4" : "q8";
+  // WebGPU: q4f16 is the best size/performance compromise available here.
+  // WASM: q8 maps to the compact quantized ONNX files and is more compatible.
+  return device === "webgpu" ? "q4f16" : "q8";
 }
 function translationProgress(info) {
   const wrap=$("translateModelProgressWrap"), bar=$("translateModelProgressBar"), txt=$("translateModelProgressText");
@@ -566,43 +567,35 @@ async function loadLocalTranslator() {
   if (state.translatorLoading) return state.translatorLoading;
   if (!transformersReady) throw new Error("Library AI browser gagal dimuat.");
   const model=$("translateModel")?.value || TRANSFORMERS_MODEL;
-  const device=getTranslationDevice();
-  const dtype=getTranslationDType(device);
-  state.translatorDevice=device; state.translatorModel=model; state.translatorLoading=(async()=>{
+  const requested=getTranslationDevice();
+  state.translatorDevice=requested; state.translatorModel=model;
+  state.translatorLoading=(async()=>{
     $("translateLoadBtn").disabled=true;
     $("translateModelProgressWrap").classList.remove("hidden");
     $("translateModelProgressBar").style.width="0%";
-    $("translateModelProgressText").textContent=`Menyiapkan AI lokal (${device.toUpperCase()}, ${dtype})…`;
+    let device=requested, dtype=getTranslationDType(device);
     try {
-      let usedDevice=device, usedDtype=dtype;
       let pipe;
       try {
-        pipe=await pipeline("translation", model, {
-          device:usedDevice, dtype:usedDtype,
-          progress_callback: translationProgress,
-        });
+        $("translateModelProgressText").textContent=`Menyiapkan NLLB-200 (${device.toUpperCase()}, ${dtype})…`;
+        pipe=await pipeline("translation", model, {device, dtype, progress_callback:translationProgress});
       } catch(firstError) {
-        // Auto mode should still work on phones where WebGPU is present but unstable.
-        if ($("translateDevice")?.value === "auto" && usedDevice === "webgpu") {
+        if ($("translateDevice")?.value === "auto" && device === "webgpu") {
           $("translateModelProgressText").textContent="WebGPU gagal, beralih ke CPU/WASM…";
-          usedDevice="wasm"; usedDtype="q8";
-          pipe=await pipeline("translation", model, {
-            device:usedDevice, dtype:usedDtype,
-            progress_callback: translationProgress,
-          });
+          device="wasm"; dtype="q8";
+          pipe=await pipeline("translation", model, {device, dtype, progress_callback:translationProgress});
         } else throw firstError;
       }
-      state.translatorDevice=usedDevice; state.translator=pipe;
+      state.translatorDevice=device; state.translator=pipe;
       $("translateModelProgressBar").style.width="100%";
-      $("translateModelProgressText").textContent=`Model siap · ${usedDevice.toUpperCase()} · ${usedDtype}`;
+      $("translateModelProgressText").textContent=`NLLB-200 siap · ${device.toUpperCase()} · ${dtype}`;
       $("translateLoadBtn").textContent="✓ Model Siap";
-      toast(`AI lokal siap · ${usedDevice.toUpperCase()}`);
+      toast(`NLLB-200 siap · ${device.toUpperCase()}`);
       return pipe;
     } catch(e) {
-      state.translator=null;
-      $("translateLoadBtn").disabled=false;
+      state.translator=null; $("translateLoadBtn").disabled=false;
       $("translateLoadBtn").textContent="⬇ Muat Model";
-      $("translateModelProgressText").textContent=`Gagal memuat model: ${e.message}`;
+      $("translateModelProgressText").textContent=`Gagal memuat NLLB-200: ${e.message}`;
       throw e;
     } finally { state.translatorLoading=null; }
   })();
@@ -622,6 +615,41 @@ function splitOuterWhitespace(text) {
   const m=text.match(/^(\s*)([\s\S]*?)(\s*)$/);
   return m ? {leading:m[1], core:m[2], trailing:m[3]} : {leading:"",core:text,trailing:""};
 }
+function getTranslationQuality() {
+  const v=$("translateQuality")?.value || "balanced";
+  if(v==="high") return {num_beams:4, max_new_tokens:192};
+  if(v==="fast") return {num_beams:1, max_new_tokens:128};
+  return {num_beams:2, max_new_tokens:160};
+}
+
+// High-confidence Football Manager 2021 terminology corrections.
+const FM2021_GLOSSARY = [
+  [/\bkaki pertama\b/gi,"leg pertama"],
+  [/\bkaki kedua\b/gi,"leg kedua"],
+  [/\bkaki ketiga\b/gi,"leg ketiga"],
+  [/\bkaki kandang\b/gi,"leg kandang"],
+  [/\bkaki tandang\b/gi,"leg tandang"],
+  [/\bpelatih kepala\b/gi,"manajer"],
+  [/\bpertandingan persahabatan\b/gi,"laga persahabatan"],
+  [/\bjadwal pertandingan\b/gi,"jadwal pertandingan"],
+  [/\banggaran pemindahan\b/gi,"anggaran transfer"],
+  [/\bbujet transfer\b/gi,"anggaran transfer"],
+];
+
+function applyFootballGrammar(text) {
+  let out=text;
+  for(const [re,repl] of FM2021_GLOSSARY) out=out.replace(re,repl);
+  // Placeholder semantics: stadium/venue -> di, date -> pada, time -> pukul.
+  out=out.replace(/\b(?:di|pada|ke|dari)\s+(\[%[^\]]+\])/gi,(m,p)=>{
+    const low=p.toLowerCase();
+    if(/date|tanggal/.test(low)) return `pada ${p}`;
+    if(/time|waktu/.test(low)) return `pukul ${p}`;
+    if(/stadium|venue|ground/.test(low)) return `di ${p}`;
+    return m;
+  });
+  return out.replace(/ {2,}/g," ").trim();
+}
+
 function placeholderParts(text) {
   const re=/\[%[^\]]+\]/g;
   const parts=[]; let last=0, m;
@@ -635,72 +663,60 @@ function placeholderParts(text) {
 }
 
 // Translate around placeholders instead of replacing them with artificial tokens.
-// MarianMT may split or omit synthetic tokens such as "LTCPLACEHOLDER0" because
+// NLLB-200 may split or omit synthetic tokens such as "LTCPLACEHOLDER0" because
 // they are not normal English vocabulary. Splitting the sentence at the exact
-// [%...] markers guarantees the original FM2011 placeholders survive byte-for-byte.
+// [%...] markers guarantees the original FM2021 placeholders survive byte-for-byte.
 async function translateTextKeepingPlaceholders(pipe, text) {
   const parts=placeholderParts(text);
-  if(!parts.some(p=>p.type==="placeholder")) {
-    const {leading,core,trailing}=splitOuterWhitespace(text);
-    if(!shouldTranslateText(core)) return text;
-    const prepared=prepareForTranslation(core);
-    const r=await pipe([prepared.masked],{max_new_tokens:128,num_beams:2});
-    const raw=Array.isArray(r)?r[0]:r;
-    const translated=typeof raw==="string"?raw:raw?.translation_text;
-    if(!translated) throw new Error("Model tidak mengembalikan teks terjemahan.");
-    const restored=restoreTranslation(translated,prepared.map);
-    if(restored===null) throw new Error("Token internal terjemahan tidak dapat dipulihkan.");
-    return leading+restored+trailing;
-  }
+  const quality=getTranslationQuality();
 
-  // Each non-placeholder fragment is translated independently; placeholders are
-  // inserted unchanged at their original logical position.
-  const fragments=[];
-  for(const part of parts){
-    if(part.type!=="text") continue;
-    const lines=part.value.split(/(\r?\n)/);
-    for(let i=0;i<lines.length;i++){
-      const line=lines[i];
-      if(/^\r?\n$/.test(line) || !line) continue;
-      const {leading,core,trailing}=splitOuterWhitespace(line);
-      if(shouldTranslateText(core)) fragments.push({part,lineIndex:i,leading,core,trailing});
+  // Preferred pass: keep the whole sentence intact while replacing FM variables
+  // with unusual markers. This lets NLLB understand prepositions and grammar.
+  if(parts.some(p=>p.type==="placeholder")) {
+    const markers=[]; let source=""; let n=0;
+    for(const part of parts){
+      if(part.type==="text") { source+=part.value; continue; }
+      const raw=part.value;
+      const kind=/stadium|venue|ground/i.test(raw)?"STADIUM":/date/i.test(raw)?"DATE":
+        /time/i.test(raw)?"TIME":/person|player|staff/i.test(raw)?"PERSON":
+        /club|team/i.test(raw)?"CLUB":/nation|nationality|country/i.test(raw)?"NATION":
+        /comp|competition|league|cup/i.test(raw)?"COMP":"VALUE";
+      const marker=`FMZX${kind}X${n}ZX`;
+      markers.push({marker,raw}); source+=` ${marker} `; n++;
     }
+    try {
+      const r=await pipe([source.trim()],{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...quality});
+      const x=Array.isArray(r)?r[0]:r; let translated=typeof x==="string"?x:x?.translation_text;
+      if(translated && markers.every(m=>new RegExp(m.marker,"i").test(translated))){
+        for(const m of markers) translated=translated.replace(new RegExp(m.marker,"gi"),m.raw);
+        return applyFootballGrammar(translated);
+      }
+    } catch(e) { console.warn("NLLB contextual pass gagal",e); }
   }
-  if(!fragments.length) return text;
 
-  const inputs=fragments.map(f=>f.core);
-  let result;
-  try { result=await pipe(inputs,{max_new_tokens:128,num_beams:2}); }
-  catch(e) {
-    result=[];
-    for(const input of inputs) result.push(...await pipe([input],{max_new_tokens:128,num_beams:2}));
-  }
-  const arr=Array.isArray(result)?result:[result];
-  if(arr.length!==fragments.length) throw new Error(`Model mengembalikan ${arr.length} hasil untuk ${fragments.length} bagian teks.`);
-
-  const byPart=new Map();
-  fragments.forEach((f,k)=>{
-    const raw=typeof arr[k]==="string"?arr[k]:arr[k]?.translation_text;
-    if(!raw) throw new Error("Model tidak mengembalikan teks terjemahan.");
-    if(!byPart.has(f.part)) byPart.set(f.part, new Map());
-    byPart.get(f.part).set(f.lineIndex, f.leading+raw.trim()+f.trailing);
-  });
-
+  // Safe fallback: translate only text fragments, preserving exact [%...] variables.
   let out="";
   for(const part of parts){
     if(part.type==="placeholder") { out+=part.value; continue; }
     const lines=part.value.split(/(\r?\n)/);
-    const map=byPart.get(part);
-    for(let i=0;i<lines.length;i++) out+=map?.get(i) ?? lines[i];
+    for(const line of lines){
+      if(/^\r?\n$/.test(line) || !line) { out+=line; continue; }
+      const {leading,core,trailing}=splitOuterWhitespace(line);
+      if(!shouldTranslateText(core)) { out+=line; continue; }
+      const r=await pipe([core],{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...quality});
+      const x=Array.isArray(r)?r[0]:r; const translated=typeof x==="string"?x:x?.translation_text;
+      if(!translated) throw new Error("Model tidak mengembalikan teks terjemahan.");
+      out+=leading+translated.trim()+trailing;
+    }
   }
-  return out;
+  return applyFootballGrammar(out);
 }
 
 async function translateBatchLocal(items) {
   const pipe=await loadLocalTranslator();
   const outputs=[];
   // Process each LTC string as a whole unit so placeholder placement is deterministic.
-  // A small number of calls is preferable to risking corruption of FM2011 format tags.
+  // A small number of calls is preferable to risking corruption of FM2021 format tags.
   for(const item of items){
     outputs.push(await translateTextKeepingPlaceholders(pipe,item.text));
   }
@@ -710,9 +726,11 @@ async function testLocalTranslation() {
   try {
     const pipe=await loadLocalTranslator();
     const samples=["Hello, this is a test.","Are you sure you want to continue?","Manager","Transfer budget"];
-    const result=await pipe(samples,{max_new_tokens:64,num_beams:2});
+    const result=await pipe(samples,{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...getTranslationQuality()});
     const lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
-    $("translateStats").textContent="Tes model berhasil:\n"+lines;
+    const fmSample="The first leg will be played at [%stadium#1-short] on [%date#1-long].";
+    const fmOut=await translateTextKeepingPlaceholders(pipe,fmSample);
+    $("translateStats").textContent="Tes NLLB berhasil:\n"+lines+"\n\nTes FM2021:\n"+fmSample+"\n→ "+fmOut;
     toast("Tes AI lokal berhasil");
   } catch(e) { console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal memuat/menjalankan model: ${e.message}`; }
 }

@@ -6,14 +6,14 @@
   <meta name="theme-color" content="#0b0f14">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="assets/icon.svg">
-  <title>LTC Editor — FM 2011</title>
+  <title>LTC Editor — FM 2021</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2011 · Browser Edition · Mobile v15 — Offline AI Translate</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v16 — NLLB AI Translate</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -35,15 +35,15 @@
   <section class="translator card">
     <div class="translator-head">
       <div>
-        <strong>🤖 Terjemahan AI Lokal — English → Indonesia</strong>
-        <div class="muted small">Tanpa API key, tanpa server terjemahan. Model berjalan langsung di browser memakai Transformers.js.</div>
+        <strong>🤖 Terjemahan AI Lokal — Football Manager 2021</strong>
+        <div class="muted small">NLLB-200 English → Indonesia · tanpa API key/server terjemahan · glossary & aturan istilah FM2021.</div>
       </div>
       <button id="translateSettingsBtn" type="button">⚙ Pengaturan</button>
     </div>
     <div class="translator-grid">
       <label>Model
         <select id="translateModel">
-          <option value="Xenova/opus-mt-en-id" selected>MarianMT English → Indonesian</option>
+          <option value="Xenova/nllb-200-distilled-600M" selected>NLLB-200 600M — Recommended</option>
         </select>
       </label>
       <label>Mode perangkat
@@ -51,6 +51,13 @@
           <option value="auto" selected>Otomatis</option>
           <option value="wasm">CPU / WASM (lebih kompatibel)</option>
           <option value="webgpu">WebGPU (jika didukung)</option>
+        </select>
+      </label>
+      <label>Kualitas
+        <select id="translateQuality">
+          <option value="fast">Cepat — beam 1</option>
+          <option value="balanced" selected>Seimbang — beam 2</option>
+          <option value="high">Tinggi — beam 4 (lebih lambat)</option>
         </select>
       </label>
       <label>Batch
@@ -74,7 +81,7 @@
     </div>
     <div class="translator-actions">
       <button id="translateLoadBtn" disabled>⬇ Muat Model</button>
-      <button id="translateTestBtn" disabled>🧪 Tes 5 String</button>
+      <button id="translateTestBtn" disabled>🧪 Tes NLLB + FM2021</button>
       <button id="translateStartBtn" disabled>▶ Mulai Translate</button>
       <button id="translatePauseBtn" disabled>⏸ Jeda</button>
       <button id="translateClearCacheBtn" disabled>🧹 Hapus Cache</button>
@@ -155,6 +162,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script type="module" src="app.js?v=14"></script>
+<script type="module" src="app.js?v=16"></script>
 </body>
 </html>
