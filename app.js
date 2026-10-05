@@ -618,27 +618,93 @@ function restoreTranslation(text,map) {
   const restored=restorePlaceholders(out,map);
   return restored===null ? null : restored.replace(/[ \t]+\n/g,"\n").trim();
 }
-async function translateBatchLocal(items) {
-  const pipe=await loadLocalTranslator();
-  const prepared=items.map(item=>({item,...prepareForTranslation(item.text)}));
-  const inputs=prepared.map(x=>x.masked);
+function splitOuterWhitespace(text) {
+  const m=text.match(/^(\s*)([\s\S]*?)(\s*)$/);
+  return m ? {leading:m[1], core:m[2], trailing:m[3]} : {leading:"",core:text,trailing:""};
+}
+function placeholderParts(text) {
+  const re=/\[%[^\]]+\]/g;
+  const parts=[]; let last=0, m;
+  while((m=re.exec(text))){
+    if(m.index>last) parts.push({type:"text",value:text.slice(last,m.index)});
+    parts.push({type:"placeholder",value:m[0]});
+    last=m.index+m[0].length;
+  }
+  if(last<text.length) parts.push({type:"text",value:text.slice(last)});
+  return parts;
+}
+
+// Translate around placeholders instead of replacing them with artificial tokens.
+// MarianMT may split or omit synthetic tokens such as "LTCPLACEHOLDER0" because
+// they are not normal English vocabulary. Splitting the sentence at the exact
+// [%...] markers guarantees the original FM2011 placeholders survive byte-for-byte.
+async function translateTextKeepingPlaceholders(pipe, text) {
+  const parts=placeholderParts(text);
+  if(!parts.some(p=>p.type==="placeholder")) {
+    const {leading,core,trailing}=splitOuterWhitespace(text);
+    if(!shouldTranslateText(core)) return text;
+    const prepared=prepareForTranslation(core);
+    const r=await pipe([prepared.masked],{max_new_tokens:128,num_beams:2});
+    const raw=Array.isArray(r)?r[0]:r;
+    const translated=typeof raw==="string"?raw:raw?.translation_text;
+    if(!translated) throw new Error("Model tidak mengembalikan teks terjemahan.");
+    const restored=restoreTranslation(translated,prepared.map);
+    if(restored===null) throw new Error("Token internal terjemahan tidak dapat dipulihkan.");
+    return leading+restored+trailing;
+  }
+
+  // Each non-placeholder fragment is translated independently; placeholders are
+  // inserted unchanged at their original logical position.
+  const fragments=[];
+  for(const part of parts){
+    if(part.type!=="text") continue;
+    const lines=part.value.split(/(\r?\n)/);
+    for(let i=0;i<lines.length;i++){
+      const line=lines[i];
+      if(/^\r?\n$/.test(line) || !line) continue;
+      const {leading,core,trailing}=splitOuterWhitespace(line);
+      if(shouldTranslateText(core)) fragments.push({part,lineIndex:i,leading,core,trailing});
+    }
+  }
+  if(!fragments.length) return text;
+
+  const inputs=fragments.map(f=>f.core);
   let result;
-  try {
-    result=await pipe(inputs,{max_new_tokens:128,num_beams:2});
-  } catch(e) {
-    // Some runtimes are more reliable with one input at a time.
+  try { result=await pipe(inputs,{max_new_tokens:128,num_beams:2}); }
+  catch(e) {
     result=[];
-    for(const x of prepared) result.push(...await pipe([x.masked],{max_new_tokens:128,num_beams:2}));
+    for(const input of inputs) result.push(...await pipe([input],{max_new_tokens:128,num_beams:2}));
   }
   const arr=Array.isArray(result)?result:[result];
-  if(arr.length!==prepared.length) throw new Error(`Model mengembalikan ${arr.length} hasil untuk ${prepared.length} teks.`);
-  return arr.map((r,i)=>{
-    const raw=typeof r==="string"?r:r?.translation_text;
+  if(arr.length!==fragments.length) throw new Error(`Model mengembalikan ${arr.length} hasil untuk ${fragments.length} bagian teks.`);
+
+  const byPart=new Map();
+  fragments.forEach((f,k)=>{
+    const raw=typeof arr[k]==="string"?arr[k]:arr[k]?.translation_text;
     if(!raw) throw new Error("Model tidak mengembalikan teks terjemahan.");
-    const restored=restoreTranslation(raw,prepared[i].map);
-    if(restored===null) throw new Error(`Placeholder pada string #${prepared[i].item.indices[0]+1} tidak dapat dipertahankan.`);
-    return restored;
+    if(!byPart.has(f.part)) byPart.set(f.part, new Map());
+    byPart.get(f.part).set(f.lineIndex, f.leading+raw.trim()+f.trailing);
   });
+
+  let out="";
+  for(const part of parts){
+    if(part.type==="placeholder") { out+=part.value; continue; }
+    const lines=part.value.split(/(\r?\n)/);
+    const map=byPart.get(part);
+    for(let i=0;i<lines.length;i++) out+=map?.get(i) ?? lines[i];
+  }
+  return out;
+}
+
+async function translateBatchLocal(items) {
+  const pipe=await loadLocalTranslator();
+  const outputs=[];
+  // Process each LTC string as a whole unit so placeholder placement is deterministic.
+  // A small number of calls is preferable to risking corruption of FM2011 format tags.
+  for(const item of items){
+    outputs.push(await translateTextKeepingPlaceholders(pipe,item.text));
+  }
+  return outputs;
 }
 async function testLocalTranslation() {
   try {

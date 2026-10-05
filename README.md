@@ -1,4 +1,4 @@
-# LTC Editor FM2011 Mobile v14 — Offline AI Translate
+# LTC Editor FM2011 Mobile v15 — Offline AI Translate
 
 Browser-based editor for Football Manager Touch 2011 `.ltc` language files.
 
@@ -18,3 +18,8 @@ The first model load requires an internet connection to Hugging Face/CDN. After 
 The tool does not guarantee that every machine-translated Football Manager sentence is stylistically perfect. Review/polish the Indonesian result before saving.
 
 Model reference: `Xenova/opus-mt-en-id`.
+
+
+## v15 placeholder fix
+
+Versi ini memperbaiki kegagalan pada string yang mengandung placeholder `[%...]`. Placeholder tidak lagi diganti dengan token buatan yang bisa diubah/dihilangkan model AI. Teks dipecah tepat di sekitar placeholder, bagian bahasa diterjemahkan, lalu placeholder asli dikembalikan pada posisi semula.
