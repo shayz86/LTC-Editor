@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v18 — Safe AI Translate</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v20 — Hybrid Quality</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -36,37 +36,42 @@
     <div class="translator-head">
       <div>
         <strong>🤖 Terjemahan AI Lokal — Football Manager 2021</strong>
-        <div class="muted small">M2M-100 English → Indonesia · tanpa API key/server terjemahan · glossary & aturan istilah FM2021.</div>
+        <div class="muted small">MarianMT English → Indonesia · cepat di HP · tanpa API key/server · glossary & koreksi istilah FM2021.</div>
       </div>
       <button id="translateSettingsBtn" type="button">⚙ Pengaturan</button>
     </div>
     <div class="translator-grid">
-      <label>Model
+      <label>Engine terjemahan
+        <select id="translateEngine">
+          <option value="hybrid" selected>Hybrid Quality — Marian + koreksi online (Recommended)</option>
+          <option value="offline">Offline Fast — MarianMT + glossary</option>
+          <option value="online">Online Quality — Google Translate eksperimental</option>
+        </select>
+      </label>
+      <label>Model lokal
         <select id="translateModel">
-          <option value="Xenova/m2m100_418M" selected>M2M-100 418M — Aman untuk HP (Recommended)</option>
-          <option value="Xenova/nllb-200-distilled-600M">NLLB-200 600M — Eksperimental / sangat berat (jangan di HP)</option>
-          <option value="Xenova/opus-mt-en-id">OPUS-MT EN→ID — Ringan / fallback</option>
+          <option value="Xenova/opus-mt-en-id" selected>MarianMT / OPUS-MT EN→ID — Cepat</option>
         </select>
       </label>
       <label>Mode perangkat
         <select id="translateDevice">
-          <option value="auto" selected>Otomatis — aman (WASM)</option>
+          <option value="auto" selected>Otomatis — WASM aman</option>
           <option value="wasm">CPU / WASM</option>
-          <option value="webgpu">WebGPU — hanya untuk model yang kompatibel</option>
+          <option value="webgpu">WebGPU — eksperimental</option>
         </select>
       </label>
-      <label>Kualitas
+      <label>Kualitas lokal
         <select id="translateQuality">
-          <option value="fast">Cepat — beam 1</option>
-          <option value="balanced" selected>Seimbang — beam 2</option>
-          <option value="high">Tinggi — beam 4 (lebih lambat)</option>
+          <option value="fast" selected>Cepat — beam 1</option>
+          <option value="balanced">Seimbang — beam 2</option>
+          <option value="high">Tinggi — beam 4</option>
         </select>
       </label>
       <label>Batch
         <select id="translateBatch">
-          <option value="1">1 string</option>
-          <option value="2" selected>2 string</option>
-          <option value="4">4 string</option>
+          <option value="5">5 string</option>
+          <option value="10">10 string</option>
+          <option value="20" selected>20 string</option>
         </select>
       </label>
       <label>Mode terjemahan
@@ -80,6 +85,21 @@
     <div id="translateSettingsExtra" class="hidden settings-row">
       <label class="checkline"><input id="translateOnlyEnglish" type="checkbox" checked> Lewati teks yang tampak non-Inggris / kode</label>
       <label class="checkline"><input id="translateUseCache" type="checkbox" checked> Gunakan cache terjemahan</label>
+      <label>Budget koreksi online
+        <select id="translateOnlineBudget">
+          <option value="100">100 string</option>
+          <option value="500" selected>500 string</option>
+          <option value="1000">1.000 string</option>
+          <option value="5000">5.000 string</option>
+        </select>
+      </label>
+      <label>Jeda online
+        <select id="translateOnlineDelay">
+          <option value="250">250 ms</option>
+          <option value="420" selected>420 ms</option>
+          <option value="700">700 ms — lebih aman</option>
+        </select>
+      </label>
     </div>
     <div class="translator-actions">
       <button id="translateLoadBtn" disabled>⬇ Muat Model</button>
@@ -96,7 +116,7 @@
       <div class="progress-track"><div id="translateProgressBar" class="progress-bar"></div></div>
       <div id="translateProgressText" class="progress-text">Belum mulai.</div>
     </div>
-    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. Model tidak diunduh otomatis. V17 sengaja menghindari WebGPU untuk mode Otomatis agar Chrome Android tidak kehabisan memori saat inisialisasi model.</div>
+    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. V20 memakai MarianMT untuk terjemahan massal yang cepat, lalu mode Hybrid hanya mengirim hasil yang terdeteksi mencurigakan ke layanan terjemahan online eksperimental. Tidak ada jaminan layanan online selalu tersedia.</div>
   </section>
 
   <section class="workspace">
@@ -164,6 +184,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script type="module" src="app.js?v=16"></script>
+<script type="module" src="app.js?v=20"></script>
 </body>
 </html>

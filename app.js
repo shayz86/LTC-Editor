@@ -14,7 +14,7 @@ const state = {
   searchToken: 0, indexing: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
   translationCache: new Map(), translationQueue: [], translationDb: null,
-  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/m2m100_418M"
+  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 500, onlineBlocked: false, onlineLastAt: 0
 };
 
 const enc = new TextEncoder();
@@ -504,10 +504,10 @@ async function verifyRoundTrip(bytes) {
   return true;
 }
 
-// ---------- Offline AI bulk translation (Transformers.js / M2M-100 + NLLB fallback) ----------
+// ---------- Offline AI bulk translation (MarianMT / OPUS-MT EN→ID + FM2021 smart post-processing) ----------
 // The model is hosted on Hugging Face and executed locally in the browser via ONNX.
 // Transformers.js supports browser-side translation and quantized dtypes for smaller downloads.
-const TRANSFORMERS_MODEL = "Xenova/m2m100_418M";
+const TRANSFORMERS_MODEL = "Xenova/opus-mt-en-id";
 let transformersReady = true;
 try {
   env.allowRemoteModels = true;
@@ -517,25 +517,17 @@ try {
 
 function getTranslationDevice() {
   const selected = $("translateDevice")?.value || "auto";
-  // Android Chrome may kill the tab when a 400M–600M seq2seq model is initialized through WebGPU.
-  // Auto therefore deliberately uses WASM; WebGPU is opt-in.
   if (selected === "webgpu") return navigator.gpu ? "webgpu" : "wasm";
   return "wasm";
 }
-function getTranslationDType(device) {
-  return device === "webgpu" ? "q4f16" : "q8";
-}
+function getTranslationDType(device) { return device === "webgpu" ? "q4f16" : "q8"; }
 function getModelSpec(model) {
-  if (/nllb-200/i.test(model)) return {name:"NLLB-200 600M", src:"eng_Latn", tgt:"ind_Latn", heavy:true};
-  if (/m2m100/i.test(model)) return {name:"M2M-100 418M", src:"en", tgt:"id", heavy:false};
-  if (/opus-mt-en-id/i.test(model)) return {name:"OPUS-MT EN→ID", src:null, tgt:null, heavy:false};
+  if (/opus-mt-en-id/i.test(model)) return {name:"MarianMT / OPUS-MT EN→ID", src:null, tgt:null, heavy:false};
   return {name:model, src:null, tgt:null, heavy:false};
 }
 function modelGenerationArgs(model) {
-  const spec=getModelSpec(model);
-  const q=getTranslationQuality();
-  if (spec.src) return {src_lang:spec.src,tgt_lang:spec.tgt,...q};
-  return {...q};
+  const spec=getModelSpec(model), q=getTranslationQuality();
+  return spec.src ? {src_lang:spec.src,tgt_lang:spec.tgt,...q} : {...q};
 }
 function translationProgress(info) {
   const wrap=$("translateModelProgressWrap"), bar=$("translateModelProgressBar"), txt=$("translateModelProgressText");
@@ -634,32 +626,173 @@ function getTranslationQuality() {
   return {num_beams:2, max_new_tokens:160};
 }
 
-// High-confidence Football Manager 2021 terminology corrections.
+// Deterministic Football Manager 2021 terminology corrections.
 const FM2021_GLOSSARY = [
-  [/\bkaki pertama\b/gi,"leg pertama"],
-  [/\bkaki kedua\b/gi,"leg kedua"],
-  [/\bkaki ketiga\b/gi,"leg ketiga"],
-  [/\bkaki kandang\b/gi,"leg kandang"],
-  [/\bkaki tandang\b/gi,"leg tandang"],
-  [/\bpelatih kepala\b/gi,"manajer"],
-  [/\bpertandingan persahabatan\b/gi,"laga persahabatan"],
-  [/\bjadwal pertandingan\b/gi,"jadwal pertandingan"],
-  [/\banggaran pemindahan\b/gi,"anggaran transfer"],
-  [/\bbujet transfer\b/gi,"anggaran transfer"],
+  [/\bkaki pertama\b/gi,"leg pertama"],[/\bkaki kedua\b/gi,"leg kedua"],[/\bkaki ketiga\b/gi,"leg ketiga"],
+  [/\bkaki kandang\b/gi,"leg kandang"],[/\bkaki tandang\b/gi,"leg tandang"],[/\bpelatih kepala\b/gi,"manajer"],
+  [/\bpelatih\b/gi,"manajer"],[/\bpertandingan persahabatan\b/gi,"laga persahabatan"],
+  [/\banggaran pemindahan\b/gi,"anggaran transfer"],[/\bbujet transfer\b/gi,"anggaran transfer"],
+  [/\bpertandingan kandang\b/gi,"laga kandang"],[/\bpertandingan tandang\b/gi,"laga tandang"],
+  [/\bpermainan kandang\b/gi,"laga kandang"],[/\bpermainan tandang\b/gi,"laga tandang"],
+  [/\bpenjaga gawang\b/gi,"kiper"],[/\bpasar transfer\b/gi,"bursa transfer"],[/\bpasar pemain\b/gi,"bursa transfer"],
+  [/\bklub sepak bola\b/gi,"klub"],[/\btransfer budget\b/gi,"anggaran transfer"],[/\btarget transfer\b/gi,"target transfer"],
+  [/\bjendela transfer\b/gi,"bursa transfer"],[/\btransfer window\b/gi,"bursa transfer"],
+  [/\btransfer market\b/gi,"bursa transfer"],[/\btransfer list\b/gi,"daftar transfer"],
+  [/\bstarting eleven\b/gi,"sebelas pemain utama"],[/\bstarting line-up\b/gi,"susunan pemain utama"],
+  [/\bstarting lineup\b/gi,"susunan pemain utama"],[/\bsubstitute\b/gi,"pemain pengganti"],
+  [/\bsubstitutes\b/gi,"pemain pengganti"],[/\bfirst team\b/gi,"tim utama"],
+  [/\breserve team\b/gi,"tim cadangan"],[/\byouth team\b/gi,"tim junior"],
+  [/\bmatch day\b/gi,"hari pertandingan"],[/\bmatchday\b/gi,"hari pertandingan"],
+  [/\bhome team\b/gi,"tim kandang"],[/\baway team\b/gi,"tim tandang"],
+  [/\bhome fixture\b/gi,"laga kandang"],[/\baway fixture\b/gi,"laga tandang"],
+  [/\bcontract offer\b/gi,"tawaran kontrak"],[/\bcontract renewal\b/gi,"perpanjangan kontrak"],
+  [/\btransfer offer\b/gi,"tawaran transfer"],[/\bloan offer\b/gi,"tawaran peminjaman"],
+  [/\bloan move\b/gi,"peminjaman"],[/\bscouting report\b/gi,"laporan pencari bakat"],
+  [/\bscout report\b/gi,"laporan pencari bakat"],[/\bmedical report\b/gi,"laporan medis"],
+  [/\btraining session\b/gi,"sesi latihan"],[/\btraining schedule\b/gi,"jadwal latihan"],
+  [/\bteam talk\b/gi,"pembicaraan tim"],[/\bteam meeting\b/gi,"rapat tim"],
+  [/\bpress conference\b/gi,"konferensi pers"],[/\bpress conference\b/gi,"konferensi pers"],
+  [/\bboard meeting\b/gi,"rapat direksi"],[/\bclub vision\b/gi,"visi klub"],
+  [/\btransfer deadline\b/gi,"batas akhir transfer"],[/\btransfer listed\b/gi,"dimasukkan daftar transfer"],
 ];
-
-function applyFootballGrammar(text) {
+function cleanMarianArtifacts(text) {
   let out=text;
+  const fixes=[
+    [/\bnyala\b/gi,"pada"],[/\bakan\s+akan\b/gi,"akan"],[/\buntuk\s+untuk\b/gi,"untuk"],
+    [/\bdari\s+dari\b/gi,"dari"],[/\bdengan\s+dengan\b/gi,"dengan"],[/\bke\s+ke\b/gi,"ke"],
+    [/\bdi\s+di\b/gi,"di"],[/\bpada\s+pada\b/gi,"pada"],[/\bsebuah\s+sebuah\b/gi,"sebuah"],
+    [/\bjendela\s+transfer\b/gi,"bursa transfer"],[/\bpasar\s+transfer\b/gi,"bursa transfer"],
+    [/\bdaftar\s+pinjaman\b/gi,"daftar peminjaman"],[/\bpinjaman\b/gi,"peminjaman"],
+  ];
+  for(const [re,repl] of fixes) out=out.replace(re,repl);
   for(const [re,repl] of FM2021_GLOSSARY) out=out.replace(re,repl);
-  // Placeholder semantics: stadium/venue -> di, date -> pada, time -> pukul.
-  out=out.replace(/\b(?:di|pada|ke|dari)\s+(\[%[^\]]+\])/gi,(m,p)=>{
+  return out;
+}
+function applyFootballGrammar(text) {
+  let out=cleanMarianArtifacts(text);
+  out=out.replace(/\b(?:di|pada|ke|dari|oleh|dengan)\s+(\[%[^\]]+\])/gi,(m,p)=>{
     const low=p.toLowerCase();
     if(/date|tanggal/.test(low)) return `pada ${p}`;
     if(/time|waktu/.test(low)) return `pukul ${p}`;
     if(/stadium|venue|ground/.test(low)) return `di ${p}`;
     return m;
   });
-  return out.replace(/ {2,}/g," ").trim();
+  return out.replace(/\s{2,}/g," ").trim();
+}
+
+
+// ---------- V20 Hybrid Quality Engine ----------
+// Offline MarianMT remains the fast bulk translator. The hybrid engine only sends
+// suspicious outputs to an unofficial Google Translate endpoint. This is optional,
+// rate-limited, cached, and NEVER presented as an official/unlimited API.
+const ONLINE_TRANSLATE_URL = "https://translate.googleapis.com/translate_a/single";
+const ONLINE_DELAY_MS = 420;
+const ONLINE_MAX_CHARS = 4500;
+
+function getTranslationEngine() { return $("translateEngine")?.value || "offline"; }
+function getOnlineBudget() { return Math.max(0, Number($("translateOnlineBudget")?.value) || 500); }
+function getOnlineDelay() { return Math.max(250, Number($("translateOnlineDelay")?.value) || ONLINE_DELAY_MS); }
+
+function englishWordSet(text) {
+  const words = (text.toLowerCase().match(/[a-z][a-z'-]{2,}/g) || []);
+  return new Set(words);
+}
+const COMMON_EN_WORDS = new Set([
+  "the","and","or","but","with","without","from","into","for","your","you","are","will","would","should","could","can","cannot","has","have","had","this","that","these","those","new","old","next","previous","current","manager","player","players","club","team","match","matches","competition","transfer","budget","contract","offer","offers","league","cup","season","training","staff","board","squad","tactic","tactics","role","roles","position","injury","injured","available","unavailable","stadium","home","away","goal","goals","assist","assists","score","scored","wins","win","lost","loss","draw","drawn","fixture","fixtures"
+]);
+function qualityIssues(source, output) {
+  const issues=[];
+  const srcPh=placeholders(source), outPh=placeholders(output);
+  if (srcPh.length !== outPh.length || srcPh.some((x,i)=>x!==outPh[i])) issues.push("placeholder");
+  if (!output || output.trim().length < 2) issues.push("empty");
+  const s=source.trim().toLowerCase(), o=output.trim().toLowerCase();
+  if (s && o===s) issues.push("unchanged");
+  if (/\b(?:nyala|kaki pertama|kaki kedua|kaki ketiga|pelatih kepala|anggaran pemindahan|bujet transfer)\b/i.test(output)) issues.push("glossary");
+  if (/\b(?:akan\s+akan|untuk\s+untuk|dari\s+dari|dengan\s+dengan|ke\s+ke|di\s+di|pada\s+pada)\b/i.test(output)) issues.push("duplicate");
+  const srcWords=englishWordSet(source), outWords=englishWordSet(output);
+  let overlap=0;
+  for(const w of outWords) if(COMMON_EN_WORDS.has(w) && srcWords.has(w)) overlap++;
+  if (outWords.size && overlap>=2) issues.push("english");
+  if (/[\uFFFD]/.test(output)) issues.push("encoding");
+  if (source.length>40 && output.length<Math.max(8, source.length*0.22)) issues.push("too-short");
+  return [...new Set(issues)];
+}
+function shouldOnlineCorrect(source, output) {
+  if (!source || !output) return true;
+  const issues=qualityIssues(source, output);
+  // Hybrid is intentionally conservative: online translation is used only when
+  // Marian produced a clearly suspicious result. This prevents 178k requests.
+  return issues.length>0;
+}
+function parseGoogleTranslateResponse(data) {
+  if (!Array.isArray(data) || !Array.isArray(data[0])) throw new Error("Respons terjemahan online tidak dikenali.");
+  return data[0].filter(x=>Array.isArray(x)&&typeof x[0]==="string").map(x=>x[0]).join("").trim();
+}
+function sleep(ms) { return new Promise(r=>setTimeout(r,ms)); }
+async function translateOnlineFragment(text) {
+  const core=String(text||"").trim();
+  if (!shouldTranslateText(core)) return text;
+  const now=Date.now(), wait=Math.max(0, getOnlineDelay()-(now-state.onlineLastAt));
+  if(wait) await sleep(wait);
+  if(core.length>ONLINE_MAX_CHARS) throw new Error(`String online terlalu panjang (${core.length} karakter).`);
+  if(state.onlineUsed>=state.onlineBudget) throw new Error("Budget koreksi online sudah habis.");
+  const url=ONLINE_TRANSLATE_URL+"?client=gtx&sl=en&tl=id&dt=t&q="+encodeURIComponent(core);
+  state.onlineLastAt=Date.now();
+  let response;
+  try {
+    response=await fetch(url,{method:"GET",mode:"cors",cache:"no-store"});
+  } catch(e) {
+    state.onlineBlocked=true;
+    throw new Error("Terjemahan online tidak dapat diakses dari browser ini (CORS/jaringan).");
+  }
+  if(!response.ok){
+    state.onlineBlocked=true;
+    throw new Error(`Terjemahan online HTTP ${response.status} (kemungkinan rate limit).`);
+  }
+  const data=await response.json();
+  const out=parseGoogleTranslateResponse(data);
+  if(!out) throw new Error("Terjemahan online kosong.");
+  state.onlineUsed++;
+  return out;
+}
+async function translateTextOnlineKeepingPlaceholders(text) {
+  const originalPh=placeholders(text);
+  if(!originalPh.length) return translateOnlineFragment(text);
+  // Unlike MarianMT, the online translator generally preserves uncommon ASCII
+  // marker tokens. Keeping the whole sentence intact is important because
+  // fragments such as "at" / "on" need the surrounding context to become
+  // "di" / "pada" correctly in Indonesian.
+  const tokenMap=[];
+  const masked=text.replace(/\[%[^\]]+\]/g,m=>{
+    const token=`ZZLTCVAR${tokenMap.length}ZZ`;
+    tokenMap.push({token,value:m});
+    return token;
+  });
+  const translated=await translateOnlineFragment(masked);
+  let out=translated;
+  for(const item of tokenMap){
+    const re=new RegExp(item.token.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"gi");
+    if(!re.test(out)) return text;
+    out=out.replace(re,item.value);
+  }
+  return applyFootballGrammar(out);
+}
+async function maybeOnlineImprove(source, localOutput) {
+  const engine=getTranslationEngine();
+  if(engine==="offline") return localOutput;
+  if(state.onlineUsed>=state.onlineBudget) return localOutput;
+  if(engine==="hybrid" && !shouldOnlineCorrect(source,localOutput)) return localOutput;
+  if(state.onlineBlocked) return localOutput;
+  try {
+    const improved=await translateTextOnlineKeepingPlaceholders(source);
+    if(improved && placeholders(improved).join("\u0000")===placeholders(source).join("\u0000")) {
+      return improved;
+    }
+    return localOutput;
+  } catch(e) {
+    state.onlineBlocked=true;
+    return localOutput;
+  }
 }
 
 function placeholderParts(text) {
@@ -679,41 +812,17 @@ function placeholderParts(text) {
 // [%...] markers and validating every marker guarantees the original FM2021 placeholders survive byte-for-byte.
 async function translateTextKeepingPlaceholders(pipe, text) {
   const parts=placeholderParts(text);
-  // Preferred pass: keep the whole sentence intact while replacing FM variables
-  // with unusual markers. This lets NLLB understand prepositions and grammar.
-  if(parts.some(p=>p.type==="placeholder")) {
-    const markers=[]; let source=""; let n=0;
-    for(const part of parts){
-      if(part.type==="text") { source+=part.value; continue; }
-      const raw=part.value;
-      const kind=/stadium|venue|ground/i.test(raw)?"STADIUM":/date/i.test(raw)?"DATE":
-        /time/i.test(raw)?"TIME":/person|player|staff/i.test(raw)?"PERSON":
-        /club|team/i.test(raw)?"CLUB":/nation|nationality|country/i.test(raw)?"NATION":
-        /comp|competition|league|cup/i.test(raw)?"COMP":"VALUE";
-      const marker=`FMZX${kind}X${n}ZX`;
-      markers.push({marker,raw}); source+=` ${marker} `; n++;
-    }
-    try {
-      const r=await pipe([source.trim()],modelGenerationArgs(state.translatorModel));
-      const x=Array.isArray(r)?r[0]:r; let translated=typeof x==="string"?x:x?.translation_text;
-      if(translated && markers.every(m=>new RegExp(m.marker,"i").test(translated))){
-        for(const m of markers) translated=translated.replace(new RegExp(m.marker,"gi"),m.raw);
-        return applyFootballGrammar(translated);
-      }
-    } catch(e) { console.warn("NLLB contextual pass gagal",e); }
-  }
-
-  // Safe fallback: translate only text fragments, preserving exact [%...] variables.
   let out="";
   for(const part of parts){
     if(part.type==="placeholder") { out+=part.value; continue; }
+    if(!shouldTranslateText(part.value)) { out+=part.value; continue; }
     const lines=part.value.split(/(\r?\n)/);
     for(const line of lines){
       if(/^\r?\n$/.test(line) || !line) { out+=line; continue; }
       const {leading,core,trailing}=splitOuterWhitespace(line);
       if(!shouldTranslateText(core)) { out+=line; continue; }
       const r=await pipe([core],modelGenerationArgs(state.translatorModel));
-      const x=Array.isArray(r)?r[0]:r; const translated=typeof x==="string"?x:x?.translation_text;
+      const x=Array.isArray(r)?r[0]:r, translated=typeof x==="string"?x:x?.translation_text;
       if(!translated) throw new Error("Model tidak mengembalikan teks terjemahan.");
       out+=leading+translated.trim()+trailing;
     }
@@ -722,26 +831,54 @@ async function translateTextKeepingPlaceholders(pipe, text) {
 }
 
 async function translateBatchLocal(items) {
-  const pipe=await loadLocalTranslator();
-  const outputs=[];
-  // Process each LTC string as a whole unit so placeholder placement is deterministic.
-  // A small number of calls is preferable to risking corruption of FM2021 format tags.
-  for(const item of items){
-    outputs.push(await translateTextKeepingPlaceholders(pipe,item.text));
+  const engine=getTranslationEngine();
+  const outputs=new Array(items.length);
+  if(engine!=="online") {
+    const pipe=await loadLocalTranslator();
+    const simple=[], placeholder=[];
+    items.forEach((it,i)=>(/\[%[^\]]+\]/.test(it.text)?placeholder:simple).push(i));
+    if(simple.length){
+      const result=await pipe(simple.map(i=>items[i].text),modelGenerationArgs(state.translatorModel));
+      for(let j=0;j<simple.length;j++){ const x=result[j]; outputs[simple[j]]=applyFootballGrammar(typeof x==="string"?x:x?.translation_text||""); }
+    }
+    for(const i of placeholder) outputs[i]=await translateTextKeepingPlaceholders(pipe,items[i].text);
+  } else {
+    for(let i=0;i<items.length;i++) outputs[i]=await translateTextOnlineKeepingPlaceholders(items[i].text);
+  }
+  if(engine!=="offline") {
+    for(let i=0;i<items.length;i++) {
+      if(engine==="hybrid" && !shouldOnlineCorrect(items[i].text,outputs[i])) continue;
+      if(engine==="online") continue;
+      if(state.onlineUsed>=state.onlineBudget || state.onlineBlocked) continue;
+      outputs[i]=await maybeOnlineImprove(items[i].text,outputs[i]);
+    }
   }
   return outputs;
 }
 async function testLocalTranslation() {
   try {
-    const pipe=await loadLocalTranslator();
+    const engine=getTranslationEngine();
+    let lines=[];
     const samples=["Hello, this is a test.","Are you sure you want to continue?","Manager","Transfer budget"];
-    const result=await pipe(samples,modelGenerationArgs(state.translatorModel));
-    const lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
+    if(engine!=="online") {
+      const pipe=await loadLocalTranslator();
+      const result=await pipe(samples,modelGenerationArgs(state.translatorModel));
+      lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
+    } else lines="Mode online: MarianMT tidak digunakan.";
     const fmSample="The first leg will be played at [%stadium#1-short] on [%date#1-long].";
-    const fmOut=await translateTextKeepingPlaceholders(pipe,fmSample);
-    $("translateStats").textContent="Tes model berhasil:\n"+lines+"\n\nTes FM2021:\n"+fmSample+"\n→ "+fmOut;
-    toast("Tes AI lokal berhasil");
-  } catch(e) { console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal memuat/menjalankan model: ${e.message}`; }
+    let fmOut;
+    if(engine==="offline") {
+      const pipe=await loadLocalTranslator(); fmOut=await translateTextKeepingPlaceholders(pipe,fmSample);
+    } else if(engine==="hybrid") {
+      const pipe=await loadLocalTranslator();
+      const r=await pipe([fmSample.replace(/\[%[^\]]+\]/g," ")],modelGenerationArgs(state.translatorModel));
+      const local=await translateTextKeepingPlaceholders(pipe,fmSample);
+      fmOut=shouldOnlineCorrect(fmSample,local) ? await maybeOnlineImprove(fmSample,local) : local;
+      lines += `\nLocal Marian → ${local}`;
+    } else fmOut=await translateTextOnlineKeepingPlaceholders(fmSample);
+    $("translateStats").textContent=`Tes engine: ${engine}\n\n${lines}\n\nTes FM2021:\n${fmSample}\n→ ${fmOut}`;
+    toast("Tes terjemahan berhasil");
+  } catch(e) { console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal menjalankan tes: ${e.message}`; }
 }
 async function buildTranslationQueue() {
   const mode=$("translateMode")?.value||"all"; let indices=[];
@@ -762,15 +899,16 @@ async function buildTranslationQueue() {
 }
 async function startTranslation() {
   if(state.translationRunning || !state.original) return;
-  state.translationPaused=false; state.translationRunning=true;
+  state.translationPaused=false; state.translationRunning=true; state.onlineBudget=getOnlineBudget(); state.onlineUsed=0; state.onlineBlocked=false;
   $("translateStartBtn").disabled=true; $("translatePauseBtn").disabled=false;
   $("translateProgressWrap").classList.remove("hidden");
   try {
-    await loadLocalTranslator();
+    const engine=getTranslationEngine();
+    if(engine!=="online") await loadLocalTranslator();
     const plan=await buildTranslationQueue(); state.translationQueue=plan.queue; state.translationTotal=plan.queue.length; state.translationDone=0;
-    $("translateStats").textContent=`Antrian unik: ${plan.queue.length.toLocaleString("id-ID")} · cache: ${plan.cached.toLocaleString("id-ID")} · dilewati: ${plan.skipped.toLocaleString("id-ID")}`;
+    $("translateStats").textContent=`Engine: ${engine} · Antrian unik: ${plan.queue.length.toLocaleString("id-ID")} · cache: ${plan.cached.toLocaleString("id-ID")} · dilewati: ${plan.skipped.toLocaleString("id-ID")} · budget online: ${state.onlineBudget.toLocaleString("id-ID")}`;
     if(!plan.queue.length){ refreshPageOffsets(); toast("Tidak ada string baru yang perlu diterjemahkan"); return; }
-    const batchSize=Math.max(1,Math.min(4,Number($("translateBatch").value)||2)); let cursor=0;
+    const batchSize=Math.max(1,Math.min(20,Number($("translateBatch").value)||20)); let cursor=0;
     while(cursor<plan.queue.length){
       if(state.translationPaused){ toast("Terjemahan dijeda"); return; }
       const batch=plan.queue.slice(cursor,cursor+batchSize);
@@ -783,19 +921,21 @@ async function startTranslation() {
       cursor+=batch.length; state.translationDone=cursor;
       const pct=Math.floor(cursor/plan.queue.length*100);
       $("translateProgressBar").style.width=pct+"%";
-      $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%`;
+      const onlineNote=getTranslationEngine()==="offline"?"":` · online ${state.onlineUsed}/${state.onlineBudget}${state.onlineBlocked?" · diblokir":""}`;
+      $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%${onlineNote}`;
+      $("translateStats").textContent=`Engine: ${engine} · selesai: ${cursor.toLocaleString("id-ID")} · koreksi online: ${state.onlineUsed.toLocaleString("id-ID")}/${state.onlineBudget.toLocaleString("id-ID")}${state.onlineBlocked?" · akses online berhenti":""}`;
       refreshPageOffsets(); await new Promise(r=>setTimeout(r,0));
     }
     toast(`Terjemahan selesai · ${plan.queue.length.toLocaleString("id-ID")} teks unik`);
   } catch(e){ console.error(e); toast(`Terjemahan berhenti: ${e.message}`); $("translateProgressText").textContent=e.message; }
-  finally { state.translationRunning=false; $("translateStartBtn").disabled=!state.original || !state.translator; $("translatePauseBtn").disabled=true; }
+  finally { state.translationRunning=false; updateTranslationUI(); $("translatePauseBtn").disabled=true; }
 }
 function pauseTranslation(){ if(state.translationRunning){state.translationPaused=true; $("translatePauseBtn").disabled=true;} }
 function updateTranslationUI(){
-  const ok=!!state.original;
-  $("translateLoadBtn").disabled=!ok || !!state.translator || !!state.translatorLoading;
+  const ok=!!state.original, engine=getTranslationEngine();
+  $("translateLoadBtn").disabled=!ok || engine==="online" || !!state.translator || !!state.translatorLoading;
   $("translateTestBtn").disabled=!ok || !!state.translatorLoading;
-  $("translateStartBtn").disabled=!ok || !state.translator || state.translationRunning;
+  $("translateStartBtn").disabled=!ok || state.translationRunning || (engine!=="online" && !state.translator);
   $("translateClearCacheBtn").disabled=!ok || state.translationRunning;
 }
 
@@ -875,6 +1015,9 @@ function jumpPage() {
 }
 
 $("translateSettingsBtn").addEventListener("click", () => { $("translateSettingsExtra").classList.toggle("hidden"); });
+$("translateEngine").addEventListener("change", () => { updateTranslationUI(); });
+$("translateOnlineBudget").addEventListener("change", () => { state.onlineBudget=getOnlineBudget(); });
+$("translateOnlineDelay").addEventListener("change", () => {});
 $("translateDevice").addEventListener("change", () => { if(state.translator){ toast("Perangkat berubah. Muat ulang model untuk memakai mode baru."); } });
 $("translateModel")?.addEventListener("change", () => {
   if(state.translator || state.translatorLoading){
