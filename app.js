@@ -14,7 +14,7 @@ const state = {
   searchToken: 0, indexing: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
   translationCache: new Map(), translationQueue: [], translationDb: null,
-  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 178700, onlineBlocked: false, onlineLastAt: 0, onlineLastEndpoint: "", onlineLastError: "", fallbackUsed: 0
+  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 178700, onlineBlocked: false, onlineLastAt: 0, onlineLastEndpoint: "", onlineLastError: "", fallbackUsed: 0, queueBuilding: false
 };
 
 const enc = new TextEncoder();
@@ -35,7 +35,12 @@ function openTranslationDB() {
 }
 async function getTranslationCache(key) {
   if (state.translationCache.has(key)) return state.translationCache.get(key);
-  try { const db=await openTranslationDB(); const v=await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readonly"),r=tx.objectStore(TDB_STORE).get(key);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error)}); db.close(); if(v){state.translationCache.set(key,v); return v;} } catch(e){}
+  try {
+    const db=await openTranslationDB();
+    const v=await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readonly"),r=tx.objectStore(TDB_STORE).get(key);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error)});
+    db.close();
+    if(v){state.translationCache.set(key,v); return v;}
+  } catch(e){}
   return null;
 }
 async function putTranslationCache(key,value) {
@@ -45,6 +50,25 @@ async function putTranslationCache(key,value) {
 async function clearTranslationCache() {
   state.translationCache.clear();
   try { const db=await openTranslationDB(); await new Promise((res,rej)=>{const tx=db.transaction(TDB_STORE,"readwrite");tx.objectStore(TDB_STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)}); db.close(); } catch(e){}
+}
+
+async function preloadTranslationCache() {
+  if(state.translationCache.size) return;
+  try {
+    const db=await openTranslationDB();
+    const data=await new Promise((res,rej)=>{
+      const tx=db.transaction(TDB_STORE,"readonly"), store=tx.objectStore(TDB_STORE);
+      const req=store.getAll();
+      req.onsuccess=()=>res(req.result||[]); req.onerror=()=>rej(req.error);
+    });
+    const keys=await new Promise((res,rej)=>{
+      const tx=db.transaction(TDB_STORE,"readonly"), store=tx.objectStore(TDB_STORE);
+      const req=store.getAllKeys();
+      req.onsuccess=()=>res(req.result||[]); req.onerror=()=>rej(req.error);
+    });
+    db.close();
+    for(let i=0;i<Math.min(keys.length,data.length);i++) state.translationCache.set(keys[i],data[i]);
+  } catch(e) { /* cache is optional; translation can continue without it */ }
 }
 function hashText(s) {
   let h=2166136261; for(let i=0;i<s.length;i++){h^=s.charCodeAt(i);h=Math.imul(h,16777619);} return (h>>>0).toString(16);
@@ -681,7 +705,7 @@ function applyFootballGrammar(text) {
 }
 
 
-// ---------- V21 Google-first Quality Engine ----------
+// ---------- V22 Google-first Quality Engine ----------
 // Google Translate experimental/unofficial endpoint is the PRIMARY translator.
 // MarianMT remains an optional fallback for network/CORS/rate-limit failures.
 // This is NOT Google Cloud Translation API and is not guaranteed to be available.
@@ -873,7 +897,7 @@ async function translateBatchLocal(items) {
     return outputs;
   }
 
-  // V21 Google-first: every new string is sent to Google first. Marian is used
+  // V22 Google-first: every new string is sent to Google first. Marian is used
   // only when explicitly enabled and Google is unavailable/blocked.
   for(let i=0;i<items.length;i++) {
     const item=items[i];
@@ -921,23 +945,50 @@ async function testLocalTranslation() {
   }
 }
 async function buildTranslationQueue() {
-  const mode=$("translateMode")?.value||"all"; let indices=[];
-  if(mode==="page") indices=pageItems();
-  else { const limit=mode==="1000"?1000:Infinity; for(let i=0;i<state.indexCount && indices.length<limit;i++) indices.push(i); }
-  const unique=new Map(), queue=[]; let cached=0, skipped=0;
-  const useCache=$("translateUseCache")?.checked!==false;
-  for(const i of indices){
-    const text=decodeAt(i); if(!shouldTranslateText(text)){skipped++;continue;}
-    if(state.dirty.has(i)) { skipped++; continue; }
-    // V21 cache namespace prevents old Marian/V20 results from being mistaken
-    // for Google-first translations.
-    const norm=normalizeForMemory(text), key=`v21-google-en-id:${hashText(norm)}`;
-    if(useCache){ const cachedVal=await getTranslationCache(key); if(cachedVal){state.dirty.set(i,cachedVal);cached++;continue;} }
-    if(unique.has(key)) unique.get(key).indices.push(i);
-    else { const item={key,text,indices:[i]}; unique.set(key,item); queue.push(item); }
-    if((i&255)===0) await new Promise(r=>setTimeout(r,0));
+  const mode=$("translateMode")?.value||"all";
+  const startPoint=$("translateStartPoint")?.value||"start";
+  let startIndex=0, endIndex=state.indexCount;
+  if(mode==="page") {
+    const pageStart=state.page*state.pageSize;
+    startIndex=Math.max(0,pageStart); endIndex=Math.min(state.indexCount,pageStart+state.pageSize);
+  } else {
+    startIndex=startPoint==="current" ? Math.min(state.indexCount,state.page*state.pageSize) : 0;
+    if(mode==="1000") endIndex=Math.min(state.indexCount,startIndex+1000);
   }
-  return {queue,cached,skipped,total:indices.length};
+  const totalRange=Math.max(0,endIndex-startIndex);
+  const unique=new Map(), queue=[]; let cached=0, skipped=0, scanned=0;
+  const useCache=$("translateUseCache")?.checked!==false;
+  if(useCache) {
+    $("translateProgressText").textContent=`Menyiapkan cache…`;
+    await preloadTranslationCache();
+  }
+  state.queueBuilding=true;
+  $("translateProgressWrap").classList.remove("hidden");
+  $("translateProgressBar").style.width="0%";
+  $("translateProgressText").textContent=`Menyiapkan antrian… 0 / ${totalRange.toLocaleString("id-ID")}`;
+  for(let i=startIndex;i<endIndex;i++){
+    const text=decodeAt(i);
+    if(!shouldTranslateText(text)){skipped++;}
+    else if(state.dirty.has(i)) { skipped++; }
+    else {
+      const norm=normalizeForMemory(text), key=`v22-google-en-id:${hashText(norm)}`;
+      if(unique.has(key)) unique.get(key).indices.push(i);
+      else {
+        const cachedVal=useCache ? state.translationCache.get(key) : null;
+        if(cachedVal){ state.dirty.set(i,cachedVal); cached++; }
+        else { const item={key,text,indices:[i]}; unique.set(key,item); queue.push(item); }
+      }
+    }
+    scanned++;
+    if((scanned%25)===0 || scanned===totalRange){
+      const pct=totalRange?Math.floor(scanned/totalRange*100):100;
+      $("translateProgressBar").style.width=pct+"%";
+      $("translateProgressText").textContent=`Menyiapkan antrian… ${scanned.toLocaleString("id-ID")} / ${totalRange.toLocaleString("id-ID")} · ${pct}% · unik ${queue.length.toLocaleString("id-ID")} · cache ${cached.toLocaleString("id-ID")}`;
+      await new Promise(r=>setTimeout(r,0));
+    }
+  }
+  state.queueBuilding=false;
+  return {queue,cached,skipped,total:totalRange,startIndex,endIndex};
 }
 async function startTranslation() {
   if(state.translationRunning || !state.original) return;
@@ -972,14 +1023,16 @@ async function startTranslation() {
     }
     toast(`Terjemahan selesai · ${plan.queue.length.toLocaleString("id-ID")} teks unik`);
   } catch(e){ console.error(e); toast(`Terjemahan berhenti: ${e.message}`); $("translateProgressText").textContent=e.message; }
-  finally { state.translationRunning=false; updateTranslationUI(); $("translatePauseBtn").disabled=true; }
+  finally { state.translationRunning=false; state.queueBuilding=false; updateTranslationUI(); $("translatePauseBtn").disabled=true; }
 }
 function pauseTranslation(){ if(state.translationRunning){state.translationPaused=true; $("translatePauseBtn").disabled=true;} }
 function updateTranslationUI(){
   const ok=!!state.original, engine=getTranslationEngine();
   $("translateLoadBtn").disabled=!ok || engine!=="marian" || !!state.translator || !!state.translatorLoading;
   $("translateTestBtn").disabled=!ok || !!state.translatorLoading;
-  $("translateStartBtn").disabled=!ok || state.translationRunning || (engine==="marian" && !state.translator);
+  $("translateStartBtn").disabled=!ok || state.translationRunning || state.queueBuilding || (engine==="marian" && !state.translator);
+  const mode=$("translateMode")?.value||"all";
+  const sp=$("translateStartPointWrap"); if(sp) sp.classList.toggle("hidden", mode==="page");
   $("translateClearCacheBtn").disabled=!ok || state.translationRunning;
 }
 

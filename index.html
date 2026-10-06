@@ -81,6 +81,12 @@
           <option value="1000">Maks. 1.000 string</option>
         </select>
       </label>
+      <label id="translateStartPointWrap">Mulai dari
+        <select id="translateStartPoint">
+          <option value="start" selected>Awal file</option>
+          <option value="current">Halaman saat ini</option>
+        </select>
+      </label>
     </div>
     <div id="translateSettingsExtra" class="hidden settings-row">
       <label class="checkline"><input id="translateOnlyEnglish" type="checkbox" checked> Lewati teks yang tampak non-Inggris / kode</label>
@@ -127,7 +133,7 @@
       <div class="progress-track"><div id="translateProgressBar" class="progress-bar"></div></div>
       <div id="translateProgressText" class="progress-text">Belum mulai.</div>
     </div>
-    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. V21 memakai Google Translate eksperimental sebagai mesin utama. Hasil disimpan ke cache berdasarkan teks sumber sehingga proses dapat dilanjutkan setelah jeda/reload. MarianMT hanya dipakai sebagai fallback jika diaktifkan.</div>
+    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. V22 memakai Google Translate eksperimental sebagai mesin utama. Pilih “Halaman saat ini” untuk menerjemahkan tepat halaman yang sedang dibuka, atau gunakan “Mulai dari → Halaman saat ini” untuk mode 1.000/semua agar antrian dimulai dari halaman tersebut. Pagination 100 juga tersedia.</div>
   </section>
 
   <section class="workspace">
@@ -151,6 +157,7 @@
             <option value="10">10</option>
             <option value="20" selected>20</option>
             <option value="50">50</option>
+            <option value="100">100</option>
           </select>
         </label>
         <label class="jump-label">Ke halaman
