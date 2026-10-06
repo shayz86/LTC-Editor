@@ -14,7 +14,7 @@ const state = {
   searchToken: 0, indexing: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
   translationCache: new Map(), translationQueue: [], translationDb: null,
-  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/nllb-200-distilled-600M"
+  translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/m2m100_418M"
 };
 
 const enc = new TextEncoder();
@@ -507,7 +507,7 @@ async function verifyRoundTrip(bytes) {
 // ---------- Offline AI bulk translation (Transformers.js / M2M-100 + NLLB fallback) ----------
 // The model is hosted on Hugging Face and executed locally in the browser via ONNX.
 // Transformers.js supports browser-side translation and quantized dtypes for smaller downloads.
-const TRANSFORMERS_MODEL = "huggingworld/m2m100_418M";
+const TRANSFORMERS_MODEL = "Xenova/m2m100_418M";
 let transformersReady = true;
 try {
   env.allowRemoteModels = true;
@@ -739,7 +739,7 @@ async function testLocalTranslation() {
     const lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
     const fmSample="The first leg will be played at [%stadium#1-short] on [%date#1-long].";
     const fmOut=await translateTextKeepingPlaceholders(pipe,fmSample);
-    $("translateStats").textContent="Tes NLLB berhasil:\n"+lines+"\n\nTes FM2021:\n"+fmSample+"\n→ "+fmOut;
+    $("translateStats").textContent="Tes model berhasil:\n"+lines+"\n\nTes FM2021:\n"+fmSample+"\n→ "+fmOut;
     toast("Tes AI lokal berhasil");
   } catch(e) { console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal memuat/menjalankan model: ${e.message}`; }
 }
