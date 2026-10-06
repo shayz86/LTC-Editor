@@ -504,10 +504,10 @@ async function verifyRoundTrip(bytes) {
   return true;
 }
 
-// ---------- Offline AI bulk translation (Transformers.js / NLLB-200) ----------
+// ---------- Offline AI bulk translation (Transformers.js / M2M-100 + NLLB fallback) ----------
 // The model is hosted on Hugging Face and executed locally in the browser via ONNX.
 // Transformers.js supports browser-side translation and quantized dtypes for smaller downloads.
-const TRANSFORMERS_MODEL = "Xenova/nllb-200-distilled-600M";
+const TRANSFORMERS_MODEL = "huggingworld/m2m100_418M";
 let transformersReady = true;
 try {
   env.allowRemoteModels = true;
@@ -517,14 +517,25 @@ try {
 
 function getTranslationDevice() {
   const selected = $("translateDevice")?.value || "auto";
+  // Android Chrome may kill the tab when a 400M–600M seq2seq model is initialized through WebGPU.
+  // Auto therefore deliberately uses WASM; WebGPU is opt-in.
   if (selected === "webgpu") return navigator.gpu ? "webgpu" : "wasm";
-  if (selected === "wasm") return "wasm";
-  return navigator.gpu ? "webgpu" : "wasm";
+  return "wasm";
 }
 function getTranslationDType(device) {
-  // WebGPU: q4f16 is the best size/performance compromise available here.
-  // WASM: q8 maps to the compact quantized ONNX files and is more compatible.
   return device === "webgpu" ? "q4f16" : "q8";
+}
+function getModelSpec(model) {
+  if (/nllb-200/i.test(model)) return {name:"NLLB-200 600M", src:"eng_Latn", tgt:"ind_Latn", heavy:true};
+  if (/m2m100/i.test(model)) return {name:"M2M-100 418M", src:"en", tgt:"id", heavy:false};
+  if (/opus-mt-en-id/i.test(model)) return {name:"OPUS-MT EN→ID", src:null, tgt:null, heavy:false};
+  return {name:model, src:null, tgt:null, heavy:false};
+}
+function modelGenerationArgs(model) {
+  const spec=getModelSpec(model);
+  const q=getTranslationQuality();
+  if (spec.src) return {src_lang:spec.src,tgt_lang:spec.tgt,...q};
+  return {...q};
 }
 function translationProgress(info) {
   const wrap=$("translateModelProgressWrap"), bar=$("translateModelProgressBar"), txt=$("translateModelProgressText");
@@ -567,6 +578,7 @@ async function loadLocalTranslator() {
   if (state.translatorLoading) return state.translatorLoading;
   if (!transformersReady) throw new Error("Library AI browser gagal dimuat.");
   const model=$("translateModel")?.value || TRANSFORMERS_MODEL;
+  const spec=getModelSpec(model);
   const requested=getTranslationDevice();
   state.translatorDevice=requested; state.translatorModel=model;
   state.translatorLoading=(async()=>{
@@ -577,7 +589,7 @@ async function loadLocalTranslator() {
     try {
       let pipe;
       try {
-        $("translateModelProgressText").textContent=`Menyiapkan NLLB-200 (${device.toUpperCase()}, ${dtype})…`;
+        $("translateModelProgressText").textContent=`Menyiapkan ${spec.name} (${device.toUpperCase()}, ${dtype})…`;
         pipe=await pipeline("translation", model, {device, dtype, progress_callback:translationProgress});
       } catch(firstError) {
         if ($("translateDevice")?.value === "auto" && device === "webgpu") {
@@ -588,14 +600,14 @@ async function loadLocalTranslator() {
       }
       state.translatorDevice=device; state.translator=pipe;
       $("translateModelProgressBar").style.width="100%";
-      $("translateModelProgressText").textContent=`NLLB-200 siap · ${device.toUpperCase()} · ${dtype}`;
+      $("translateModelProgressText").textContent=`${spec.name} siap · ${device.toUpperCase()} · ${dtype}`;
       $("translateLoadBtn").textContent="✓ Model Siap";
-      toast(`NLLB-200 siap · ${device.toUpperCase()}`);
+      toast(`${spec.name} siap · ${device.toUpperCase()}`);
       return pipe;
     } catch(e) {
       state.translator=null; $("translateLoadBtn").disabled=false;
       $("translateLoadBtn").textContent="⬇ Muat Model";
-      $("translateModelProgressText").textContent=`Gagal memuat NLLB-200: ${e.message}`;
+      $("translateModelProgressText").textContent=`Gagal memuat ${spec.name}: ${e.message}`;
       throw e;
     } finally { state.translatorLoading=null; }
   })();
@@ -663,13 +675,10 @@ function placeholderParts(text) {
 }
 
 // Translate around placeholders instead of replacing them with artificial tokens.
-// NLLB-200 may split or omit synthetic tokens such as "LTCPLACEHOLDER0" because
-// they are not normal English vocabulary. Splitting the sentence at the exact
-// [%...] markers guarantees the original FM2021 placeholders survive byte-for-byte.
+// The model may split or omit synthetic tokens. Splitting the sentence at the exact
+// [%...] markers and validating every marker guarantees the original FM2021 placeholders survive byte-for-byte.
 async function translateTextKeepingPlaceholders(pipe, text) {
   const parts=placeholderParts(text);
-  const quality=getTranslationQuality();
-
   // Preferred pass: keep the whole sentence intact while replacing FM variables
   // with unusual markers. This lets NLLB understand prepositions and grammar.
   if(parts.some(p=>p.type==="placeholder")) {
@@ -685,7 +694,7 @@ async function translateTextKeepingPlaceholders(pipe, text) {
       markers.push({marker,raw}); source+=` ${marker} `; n++;
     }
     try {
-      const r=await pipe([source.trim()],{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...quality});
+      const r=await pipe([source.trim()],modelGenerationArgs(state.translatorModel));
       const x=Array.isArray(r)?r[0]:r; let translated=typeof x==="string"?x:x?.translation_text;
       if(translated && markers.every(m=>new RegExp(m.marker,"i").test(translated))){
         for(const m of markers) translated=translated.replace(new RegExp(m.marker,"gi"),m.raw);
@@ -703,7 +712,7 @@ async function translateTextKeepingPlaceholders(pipe, text) {
       if(/^\r?\n$/.test(line) || !line) { out+=line; continue; }
       const {leading,core,trailing}=splitOuterWhitespace(line);
       if(!shouldTranslateText(core)) { out+=line; continue; }
-      const r=await pipe([core],{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...quality});
+      const r=await pipe([core],modelGenerationArgs(state.translatorModel));
       const x=Array.isArray(r)?r[0]:r; const translated=typeof x==="string"?x:x?.translation_text;
       if(!translated) throw new Error("Model tidak mengembalikan teks terjemahan.");
       out+=leading+translated.trim()+trailing;
@@ -726,7 +735,7 @@ async function testLocalTranslation() {
   try {
     const pipe=await loadLocalTranslator();
     const samples=["Hello, this is a test.","Are you sure you want to continue?","Manager","Transfer budget"];
-    const result=await pipe(samples,{src_lang:"eng_Latn",tgt_lang:"ind_Latn",...getTranslationQuality()});
+    const result=await pipe(samples,modelGenerationArgs(state.translatorModel));
     const lines=result.map((x,i)=>`${samples[i]} → ${x.translation_text}`).join("\n");
     const fmSample="The first leg will be played at [%stadium#1-short] on [%date#1-long].";
     const fmOut=await translateTextKeepingPlaceholders(pipe,fmSample);
@@ -867,6 +876,14 @@ function jumpPage() {
 
 $("translateSettingsBtn").addEventListener("click", () => { $("translateSettingsExtra").classList.toggle("hidden"); });
 $("translateDevice").addEventListener("change", () => { if(state.translator){ toast("Perangkat berubah. Muat ulang model untuk memakai mode baru."); } });
+$("translateModel")?.addEventListener("change", () => {
+  if(state.translator || state.translatorLoading){
+    state.translator=null; state.translatorLoading=null;
+    $("translateLoadBtn").disabled=false; $("translateLoadBtn").textContent="⬇ Muat Model";
+    $("translateTestBtn").disabled=true; $("translateStartBtn").disabled=true;
+    $("translateModelProgressText").textContent="Model berubah. Muat model yang baru.";
+  }
+});
 $("translateLoadBtn").addEventListener("click", async()=>{ try { await loadLocalTranslator(); updateTranslationUI(); } catch(e){ updateTranslationUI(); } });
 $("translateTestBtn").addEventListener("click", testLocalTranslation);
 $("translateStartBtn").addEventListener("click", startTranslation);

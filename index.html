@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v16 — NLLB AI Translate</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v17 — Safe AI Translate</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -36,21 +36,23 @@
     <div class="translator-head">
       <div>
         <strong>🤖 Terjemahan AI Lokal — Football Manager 2021</strong>
-        <div class="muted small">NLLB-200 English → Indonesia · tanpa API key/server terjemahan · glossary & aturan istilah FM2021.</div>
+        <div class="muted small">M2M-100 / NLLB English → Indonesia · tanpa API key/server terjemahan · glossary & aturan istilah FM2021.</div>
       </div>
       <button id="translateSettingsBtn" type="button">⚙ Pengaturan</button>
     </div>
     <div class="translator-grid">
       <label>Model
         <select id="translateModel">
-          <option value="Xenova/nllb-200-distilled-600M" selected>NLLB-200 600M — Recommended</option>
+          <option value="huggingworld/m2m100_418M" selected>M2M-100 418M — Aman untuk HP (Recommended)</option>
+          <option value="Xenova/nllb-200-distilled-600M">NLLB-200 600M — Kualitas tinggi / sangat berat</option>
+          <option value="Xenova/opus-mt-en-id">OPUS-MT EN→ID — Ringan / fallback</option>
         </select>
       </label>
       <label>Mode perangkat
         <select id="translateDevice">
-          <option value="auto" selected>Otomatis</option>
-          <option value="wasm">CPU / WASM (lebih kompatibel)</option>
-          <option value="webgpu">WebGPU (jika didukung)</option>
+          <option value="auto" selected>Otomatis — aman (WASM)</option>
+          <option value="wasm">CPU / WASM</option>
+          <option value="webgpu">WebGPU — hanya untuk model yang kompatibel</option>
         </select>
       </label>
       <label>Kualitas
@@ -81,7 +83,7 @@
     </div>
     <div class="translator-actions">
       <button id="translateLoadBtn" disabled>⬇ Muat Model</button>
-      <button id="translateTestBtn" disabled>🧪 Tes NLLB + FM2021</button>
+      <button id="translateTestBtn" disabled>🧪 Tes Model + FM2021</button>
       <button id="translateStartBtn" disabled>▶ Mulai Translate</button>
       <button id="translatePauseBtn" disabled>⏸ Jeda</button>
       <button id="translateClearCacheBtn" disabled>🧹 Hapus Cache</button>
@@ -94,7 +96,7 @@
       <div class="progress-track"><div id="translateProgressBar" class="progress-bar"></div></div>
       <div id="translateProgressText" class="progress-text">Belum mulai.</div>
     </div>
-    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. Model tidak diunduh otomatis.</div>
+    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. Model tidak diunduh otomatis. V17 sengaja menghindari WebGPU untuk mode Otomatis agar Chrome Android tidak kehabisan memori saat inisialisasi model.</div>
   </section>
 
   <section class="workspace">

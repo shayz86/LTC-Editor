@@ -1,8 +1,8 @@
-# LTC Editor Football Manager 2021 — Mobile v16
+# LTC Editor Football Manager 2021 — Mobile v17
 
 Browser-based editor for Football Manager 2021 `.ltc` language files.
 
-## v16 — NLLB-200 + Football Manager glossary
+## v16 — M2M-100 / NLLB + Football Manager glossary
 - Model: `Xenova/nllb-200-distilled-600M` via Transformers.js.
 - English → Indonesian using `eng_Latn` → `ind_Latn`.
 - Runs in the browser with WebGPU when available, with WASM fallback.
@@ -21,3 +21,7 @@ The NLLB model is hosted on Hugging Face and downloaded on first use. Transforme
 The model is licensed CC-BY-NC-4.0; check that license if you plan to distribute the model or use the project commercially.
 
 This tool is an unofficial editor/translation utility and is not affiliated with Sports Interactive or SEGA.
+
+
+## V17 safety note
+V16 used NLLB-200 distilled 600M as the automatic WebGPU model. Its quantized ONNX files are large enough to trigger memory pressure on Android Chrome during initialization. V17 defaults to M2M-100 418M over WASM and makes WebGPU opt-in. NLLB remains available as an experimental high-memory option.
