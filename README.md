@@ -1,79 +1,118 @@
-# LTC Editor Football Manager 2021 — Mobile v20
+# LTC Editor Football Manager 2021 — Mobile v21
 
-Editor `.ltc` Football Manager 2021 yang berjalan di browser.
+Browser editor untuk file bahasa `.ltc` Football Manager 2021.
 
-## Fokus V20: Hybrid Quality
+## Fokus V21: Google-first Quality
 
-V20 tidak lagi mengejar model lokal yang lebih besar seperti NLLB-200 atau M2M-100 karena model tersebut terlalu berat/lambat untuk Chrome Android.
+V21 mengubah strategi dari V20. Mesin utama sekarang adalah **Google Translate eksperimental/tidak resmi**, sedangkan MarianMT hanya digunakan sebagai fallback jika pengguna mengaktifkannya.
 
-V20 memakai dua tahap:
+Alur:
 
-1. **MarianMT / OPUS-MT EN→ID** untuk menerjemahkan banyak string secara lokal dan cepat.
-2. **Hybrid Quality** mendeteksi hasil Marian yang mencurigakan lalu, hanya untuk string tersebut, mencoba koreksi melalui endpoint Google Translate eksperimental tanpa API key.
+```text
+English LTC
+   ↓
+Proteksi placeholder [%...]
+   ↓
+Google Translate eksperimental
+   ↓
+Koreksi istilah Football Manager 2021
+   ↓
+Validasi placeholder
+   ↓
+Cache IndexedDB
+   ↓
+LTC hasil terjemahan
+```
 
-Jika layanan online gagal, mode Hybrid otomatis kembali memakai hasil Marian dan proses tidak perlu berhenti.
+Jika Google gagal, terkena CORS/jaringan/rate limit, atau dibatasi, V21 dapat memakai MarianMT sebagai fallback.
 
-### Mode engine
+## Fitur utama
 
-- **Hybrid Quality (Recommended)** — MarianMT untuk semua string + koreksi online hanya untuk hasil mencurigakan.
-- **Offline Fast** — 100% lokal, tanpa koneksi terjemahan online.
-- **Online Quality** — memakai endpoint online eksperimental; cocok untuk pengujian sampel atau jumlah terbatas, bukan untuk 178.700 string sekaligus.
+- Google Translate eksperimental sebagai engine utama.
+- Dua endpoint Google dicoba secara berurutan:
+  - `translate.googleapis.com/translate_a/single` dengan client `gtx`.
+  - `clients5.google.com/translate_a/t` dengan client `dict-chrome-ex` sebagai fallback endpoint.
+- Retry otomatis dengan backoff.
+- Jeda request yang dapat diatur.
+- Cache IndexedDB berdasarkan teks sumber.
+- Cache menggunakan namespace V21 sehingga hasil Marian dari versi lama tidak tercampur dengan hasil Google V21.
+- Jika Chrome reload/crash setelah sebagian proses, string yang sudah tersimpan di cache dapat dilewati saat proses dimulai lagi.
+- Placeholder `[%stadium#1-short]`, `[%date#1-long]`, dan marker FM lainnya dipertahankan byte-for-byte.
+- Glossary dan koreksi istilah Football Manager 2021 tetap digunakan.
+- MarianMT dapat dimuat hanya ketika dibutuhkan sebagai fallback atau dipilih sebagai engine offline.
+- LTC save/rebuild engine tervalidasi dari V11 dipertahankan.
 
-### Koreksi Football Manager 2021
+## Pengaturan yang disarankan untuk pengujian
 
-V20 mempertahankan glossary dan grammar khusus FM2021, termasuk istilah seperti:
+Untuk HP Android:
 
-- first leg / second leg → leg pertama / leg kedua
-- transfer window / transfer market → bursa transfer
-- transfer budget → anggaran transfer
-- home fixture / away fixture → laga kandang / laga tandang
-- manager → manajer
-- goalkeeper → kiper
-- starting lineup → susunan pemain utama
-- contract offer → tawaran kontrak
-- scouting report → laporan pencari bakat
-- training session → sesi latihan
-- press conference → konferensi pers
+- Engine: **Google Translate eksperimental**
+- Batch proses: **5**
+- Cache: **aktif**
+- Fallback Marian: **aktif**
+- Jeda Google: **700 ms**
+- Retry: **2**
+- Mode terjemahan: mulai dengan **Halaman saat ini** atau **Maks. 1.000 string**
 
-Placeholder `[%...]` dipertahankan persis dan divalidasi sebelum hasil diterapkan.
+Setelah kualitas dan stabilitas sesuai, baru gunakan **Semua string**.
 
-## Online translation: penting
+## Tentang endpoint Google
 
-Endpoint online yang dipakai V20 adalah endpoint Google Translate yang umum digunakan secara tidak resmi (`translate.googleapis.com/...client=gtx`). Ini **bukan Google Cloud Translation API resmi**, tidak dijamin selalu tersedia, dapat terkena CORS/rate limit, dan dapat berubah sewaktu-waktu.
+Endpoint yang digunakan V21 bukan Google Cloud Translation API resmi. Endpoint `translate.googleapis.com/translate_a/single?client=gtx` memang masih digunakan oleh berbagai implementasi pihak ketiga, tetapi tidak merupakan kontrak API resmi yang dijamin Google. Endpoint tersebut dapat berubah, membatasi trafik, atau tidak dapat diakses dari jaringan/browser tertentu.
 
-Karena itu V20 menyediakan:
+Karena itu V21 tidak mengklaim bahwa 178.700 string dapat diterjemahkan tanpa batas atau tanpa rate limit.
 
-- budget koreksi online (default 500 string)
-- jeda request (default 420 ms)
-- cache IndexedDB
-- fallback ke hasil Marian jika online gagal
+## Perkiraan waktu
 
-Jangan menganggap layanan ini gratis/tanpa batas atau cocok untuk mengirim seluruh 178.700 string.
+Dengan jeda 700 ms dan satu request per string, 178.700 string secara teori dapat membutuhkan lebih dari 34 jam jika seluruhnya unik dan berhasil. File nyata biasanya memiliki string berulang sehingga cache dan deduplikasi dapat mengurangi jumlah request.
+
+Karena alasan tersebut, **jangan langsung memulai 178.700 string sebelum pengujian sampel berhasil**.
+
+## Placeholder
+
+Contoh:
+
+```text
+The first leg will be played at [%stadium#1-short] on [%date#1-long].
+```
+
+V21 mengirim teks dengan marker sementara, lalu mengembalikan marker asli. Hasil yang diharapkan:
+
+```text
+Leg pertama akan dimainkan di [%stadium#1-short] pada [%date#1-long].
+```
+
+Jika placeholder tidak dapat dipulihkan persis, hasil Google tidak digunakan.
 
 ## LTC save engine
 
-Engine save/rebuild yang tervalidasi dari V11 dipertahankan. Struktur LTC asli yang penting tetap dijaga:
+Engine V11 yang telah diuji pada `english.ltc` dipertahankan. Rebuild menjaga:
 
-- ID dan urutan record
-- marker record termasuk marker non-`0x01`
-- gap non-indexed
-- count dan index 9-byte
-- footer
-- offset fisik dihitung ulang bila panjang UTF-8 berubah
-
-File hasil juga divalidasi ulang sebelum diunduh.
+- ID dan urutan record.
+- Marker record termasuk marker non-`0x01`.
+- Gap non-indexed.
+- Count record.
+- Index 9-byte.
+- Footer.
+- Offset fisik yang dihitung ulang ketika panjang UTF-8 berubah.
+- Validasi hasil sebelum download.
 
 ## Cara memakai
 
-1. Buka `index.html` melalui GitHub Pages/Cloudflare Pages atau server lokal.
-2. Pilih `english.ltc` FM2021.
-3. Tes terlebih dahulu dengan **🧪 Tes Model + FM2021**.
-4. Untuk uji awal, gunakan **Halaman saat ini** atau **Maks. 1.000 string**.
-5. Setelah hasil sesuai, gunakan **Semua string**.
-6. Simpan melalui **💾 Simpan / Download**.
+1. Buka `index.html` melalui GitHub Pages, Cloudflare Pages, atau server lokal.
+2. Buka `english.ltc` Football Manager 2021.
+3. Pilih **Google Translate eksperimental**.
+4. Jalankan **Tes Google + FM2021**.
+5. Pastikan contoh placeholder menghasilkan terjemahan yang masuk akal.
+6. Uji **Halaman saat ini**.
+7. Uji **Maks. 1.000 string**.
+8. Jika stabil, gunakan **Semua string**.
+9. Setelah selesai, gunakan **Simpan / Download**.
 
-## Catatan Android
+## Catatan penting
 
-MarianMT dipertahankan sebagai model utama karena jauh lebih ringan daripada NLLB-200/M2M-100 di perangkat Android. WebGPU tetap opsional dan tidak diperlukan untuk mode aman WASM.
-
-Project ini tidak berafiliasi dengan Sports Interactive atau SEGA.
+- V21 memerlukan koneksi internet untuk Google Translate.
+- Tidak diperlukan API key Google Cloud.
+- Tidak ada jaminan endpoint eksperimental selalu tersedia.
+- Jangan menganggap endpoint ini sebagai Google Cloud Translation API resmi atau layanan unlimited.
+- Project ini tidak berafiliasi dengan Sports Interactive atau SEGA.
