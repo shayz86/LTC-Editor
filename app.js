@@ -11,7 +11,7 @@ const state = {
   selected: -1, page: 0, pageSize: 20,
   filter: "", caseSensitive: false, placeholdersOnly: false,
   dirty: new Map(), lastResults: [], searchMode: false,
-  searchToken: 0, indexing: false,
+  searchToken: 0, indexing: false, exactSearch: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
   translationCache: new Map(), translationQueue: [], translationDb: null,
   translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 178700, onlineBlocked: false, onlineLastAt: 0, onlineLastEndpoint: "", onlineLastError: "", fallbackUsed: 0, queueBuilding: false
@@ -280,7 +280,7 @@ function goPage(page) {
   if (!total) return;
   state.page = Math.max(0, Math.min(page, total - 1));
   renderResults();
-  window.scrollTo({ top: 0, behavior: "instant" });
+  // Keep the current viewport position when changing pagination.
 }
 
 async function searchMatches() {
@@ -298,7 +298,8 @@ async function searchMatches() {
   for (let i = 0; i < state.markers.length; i++) {
     if (token !== state.searchToken) return;
     const text = decodeAt(i), hay = state.caseSensitive ? text : text.toLocaleLowerCase();
-    const match = !needle || hay.includes(needle), ph = !state.placeholdersOnly || placeholders(text).length > 0;
+    const normalizedHay = hay.trim();
+    const match = !needle || (state.exactSearch ? normalizedHay === needle : hay.includes(needle)), ph = !state.placeholdersOnly || placeholders(text).length > 0;
     if (match && ph) results.push(i);
     if (i % 800 === 0) await new Promise(r => setTimeout(r, 0));
   }
@@ -1103,7 +1104,7 @@ async function restoreCachedFile() {
 }
 
 function changePageSize(value) {
-  const n = Number(value); if (![10,20,50].includes(n)) return;
+  const n = Number(value); if (![10,20,50,100].includes(n)) return;
   const firstIndex = state.page * state.pageSize; state.pageSize = n; state.page = Math.floor(firstIndex / n); renderResults();
 }
 function jumpPage() {
@@ -1133,6 +1134,7 @@ $("fileInput").addEventListener("change", e => { const f=e.target.files?.[0]; if
 let searchTimer;
 $("searchInput").addEventListener("input", e => { state.filter=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(searchMatches,280); });
 $("caseSensitive").addEventListener("change", e => { state.caseSensitive=e.target.checked; searchMatches(); });
+$("exactSearch").addEventListener("change", e => { state.exactSearch=e.target.checked; searchMatches(); });
 $("placeholdersOnly").addEventListener("change", e => { state.placeholdersOnly=e.target.checked; searchMatches(); });
 $("clearSearch").addEventListener("click", () => { $("searchInput").value=""; state.filter=""; state.searchToken++; state.searchMode=false; state.lastResults=[]; state.page=0; renderResults(); $("searchInput").focus(); });
 $("results").addEventListener("click", e => { const btn=e.target.closest(".result"); if(btn) selectRecord(Number(btn.dataset.index)); });
