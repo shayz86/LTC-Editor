@@ -120,6 +120,20 @@ function decodeAt(i) {
   return state.dirty.has(i) ? state.dirty.get(i) : originalTextAt(i);
 }
 function placeholders(text) { return text.match(/\[%[^\]]+\]/g) || []; }
+
+// FM person-pronoun placeholders can be converted into ordinary words before
+// translation when the user wants fixed Indonesian pronouns instead of runtime tokens.
+// I/you become normal English pronouns for Google/Marian to translate in context;
+// your is also expanded as English so the translator can form natural possessives.
+function expandPersonPronounPlaceholders(text) {
+  return String(text ?? "").replace(/\[%\s*person#\d+-(I|you|your)\s*\]/gi, (_match, pronoun) => {
+    const key=String(pronoun).toLowerCase();
+    return key === "i" ? "I" : key === "you" ? "you" : "your";
+  });
+}
+function expectedPreservedPlaceholders(text) {
+  return placeholders(expandPersonPronounPlaceholders(text));
+}
 function countPrintable(s) {
   let n = 0;
   for (let i = 0; i < s.length; i++) {
@@ -733,7 +747,7 @@ const COMMON_EN_WORDS = new Set([
 ]);
 function qualityIssues(source, output) {
   const issues=[];
-  const srcPh=placeholders(source), outPh=placeholders(output);
+  const srcPh=expectedPreservedPlaceholders(source), outPh=placeholders(output);
   if (srcPh.length !== outPh.length || srcPh.some((x,i)=>x!==outPh[i])) issues.push("placeholder");
   if (!output || output.trim().length < 2) issues.push("empty");
   const s=source.trim().toLowerCase(), o=output.trim().toLowerCase();
@@ -825,6 +839,9 @@ function restoreGooglePlaceholders(text,map) {
   return out;
 }
 async function translateTextOnlineKeepingPlaceholders(text) {
+  // Convert person pronoun placeholders to plain English before translation.
+  // Other LTC placeholders remain protected and must be restored exactly.
+  text=expandPersonPronounPlaceholders(text);
   const originalPh=placeholders(text);
   if(!originalPh.length) return applyFootballGrammar(await translateOnlineFragment(text));
   const {masked,map}=googleMaskPlaceholders(text);
@@ -864,6 +881,9 @@ function placeholderParts(text) {
 // The model may split or omit synthetic tokens. Splitting the sentence at the exact
 // [%...] markers and validating every marker guarantees the original FM2021 placeholders survive byte-for-byte.
 async function translateTextKeepingPlaceholders(pipe, text) {
+  // Fixed pronoun substitutions: [%person#1-I] -> translated “I”, etc.
+  // Keep every other FM2021 placeholder unchanged.
+  text=expandPersonPronounPlaceholders(text);
   const parts=placeholderParts(text);
   let out="";
   for(const part of parts){
