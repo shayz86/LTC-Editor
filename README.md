@@ -1,4 +1,4 @@
-# LTC Editor Football Manager 2021 — Mobile v25
+# LTC Editor Football Manager 2021 — Mobile v26
 
 Browser editor untuk file bahasa `.ltc` Football Manager 2021.
 
@@ -26,15 +26,21 @@ LTC hasil terjemahan
 
 Jika Google gagal, terkena CORS/jaringan/rate limit, atau dibatasi, V21 dapat memakai MarianMT sebagai fallback.
 
-## Fitur V25: konversi placeholder kata ganti orang
+## Fitur V26: kata ganti orang, terjemahan hasil pencarian, dan pencarian posisi
 
 Sebelum teks dikirim ke Google Translate atau MarianMT, placeholder khusus berikut dikonversi menjadi kata bahasa Inggris biasa agar diterjemahkan sesuai konteks:
 
 - `[%person#1-I]` → `I` → biasanya diterjemahkan menjadi `saya`.
 - `[%person#1-you]` → `you` → biasanya diterjemahkan menjadi `kamu/Anda` sesuai konteks.
+- `[%person#1-he]`, `[%person#1-him]`, `[%person#1-his]` → kata ganti laki-laki.
+- `[%person#1-she]`, `[%person#1-her]`, `[%person#1-hers]` → kata ganti perempuan.
+- `[%person#1-it]`, `[%person#1-its]`, `[%person#1-they]`, `[%person#1-them]`, `[%person#1-their]`, dan bentuk lain termasuk `we/us/our`, `mine`, `yours`, `theirs`.
 - `[%person#1-your]` → `your` → diterjemahkan sebagai bentuk kepemilikan sesuai susunan kalimat.
 
 Pola ini berlaku untuk nomor person lain juga, misalnya `[%person#2-you]`. Placeholder FM2021 lain seperti `[%stadium#1-short]` dan `[%date#1-long]` tetap dilindungi dan harus dipertahankan persis. Hasil untuk `your` bergantung konteks kalimat; periksa hasil terjemahan karena bentuk kepemilikan bahasa Indonesia bisa memerlukan susunan kata yang berbeda.
+
+- Mode terjemahan `Halaman saat ini` menerjemahkan halaman yang sedang terlihat, termasuk hasil pencarian. Mode `Halaman hasil search saja` membatasi proses hanya pada halaman hasil pencarian aktif.
+- Pencarian dapat difilter agar frasa berada di posisi awal atau posisi akhir string.
 
 ## Fitur utama
 
@@ -134,3 +140,11 @@ V24 menambahkan ekspansi placeholder pronoun `person#N-I`, `person#N-you`, dan `
 
 
 V25 juga mengonversi placeholder `[%person#N-me]` dan `[%person#N-my]` menjadi kata Inggris `me` dan `my` sebelum terjemahan. Placeholder kata ganti yang dikenali: I, you, me, my, your. Placeholder LTC lainnya tetap dipertahankan.
+
+
+## Catatan versi V26
+
+- Menambahkan placeholder kata ganti orang: `I`, `me`, `my`, `mine`, `you`, `your`, `yours`, `we`, `us`, `our`, `ours`, `he`, `him`, `his`, `she`, `her`, `hers`, `it`, `its`, `they`, `them`, `their`, `theirs`. Placeholder ini diubah menjadi kata Inggris biasa sebelum diterjemahkan. Placeholder LTC lain tetap dipertahankan.
+- Mode terjemahan `Halaman saat ini` sekarang menerjemahkan indeks yang sedang terlihat, termasuk jika daftar sedang difilter dengan search.
+- Mode `Halaman hasil search saja` secara eksplisit hanya menerjemahkan hasil pada halaman pencarian yang sedang terlihat. Jika tidak ada pencarian aktif, mode ini tidak membuat antrian.
+- Pencarian memiliki opsi `Posisi awal string` dan `Posisi akhir string`. Keduanya memeriksa awal/akhir isi string setelah spasi tepi diabaikan. Mode ini bisa dipakai bersama filter placeholder.

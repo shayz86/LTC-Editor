@@ -126,7 +126,7 @@ function placeholders(text) { return text.match(/\[%[^\]]+\]/g) || []; }
 // I/you/me/my/your placeholders become ordinary English pronouns before translation,
 // allowing Google/Marian to translate them naturally in sentence context.
 function expandPersonPronounPlaceholders(text) {
-  return String(text ?? "").replace(/\[%\s*person#\d+-(I|you|me|my|your)\s*\]/gi, (_match, pronoun) => {
+  return String(text ?? "").replace(/\[%\s*person#\d+-(I|me|my|mine|you|your|yours|we|us|our|ours|he|him|his|she|her|hers|it|its|they|them|their|theirs)\s*\]/gi, (_match, pronoun) => {
     const key=String(pronoun).toLowerCase();
     return key === "i" ? "I" : key;
   });
@@ -313,7 +313,17 @@ async function searchMatches() {
     if (token !== state.searchToken) return;
     const text = decodeAt(i), hay = state.caseSensitive ? text : text.toLocaleLowerCase();
     const normalizedHay = hay.trim();
-    const match = !needle || (state.exactSearch ? normalizedHay === needle : hay.includes(needle)), ph = !state.placeholdersOnly || placeholders(text).length > 0;
+    const starts = document.getElementById("startsWithSearch")?.checked || false;
+    const ends = document.getElementById("endsWithSearch")?.checked || false;
+    let match = !needle;
+    if (needle) {
+      if (state.exactSearch) match = normalizedHay === needle;
+      else if (starts && ends) match = normalizedHay.startsWith(needle) && normalizedHay.endsWith(needle);
+      else if (starts) match = normalizedHay.startsWith(needle);
+      else if (ends) match = normalizedHay.endsWith(needle);
+      else match = hay.includes(needle);
+    }
+    const ph = !state.placeholdersOnly || placeholders(text).length > 0;
     if (match && ph) results.push(i);
     if (i % 800 === 0) await new Promise(r => setTimeout(r, 0));
   }
@@ -959,7 +969,7 @@ async function testLocalTranslation() {
       lines+=`Google endpoint: ${state.onlineLastEndpoint||"—"}`;
       if(state.onlineLastError) lines+=`\nPeringatan terakhir: ${state.onlineLastError}`;
     }
-    $("translateStats").textContent=`Tes engine V21\n\n${lines}\n\nTes FM2021:\n${fmSample}\n→ ${fmOut}`;
+    $("translateStats").textContent=`Tes engine V26\n\n${lines}\n\nTes FM2021:\n${fmSample}\n→ ${fmOut}`;
     toast("Tes terjemahan berhasil");
   } catch(e) {
     console.error(e); toast(`Tes AI gagal: ${e.message}`); $("translateStats").textContent=`Gagal menjalankan tes: ${e.message}`;
@@ -968,15 +978,28 @@ async function testLocalTranslation() {
 async function buildTranslationQueue() {
   const mode=$("translateMode")?.value||"all";
   const startPoint=$("translateStartPoint")?.value||"start";
-  let startIndex=0, endIndex=state.indexCount;
+  let indices=[];
   if(mode==="page") {
-    const pageStart=state.page*state.pageSize;
-    startIndex=Math.max(0,pageStart); endIndex=Math.min(state.indexCount,pageStart+state.pageSize);
+    // The visible page means the currently displayed page, including search results.
+    indices=pageItems();
+  } else if(mode==="searchPage") {
+    // Explicit mode for the visible page of search results; do not translate sequential records.
+    indices=state.searchMode ? pageItems() : [];
   } else {
-    startIndex=startPoint==="current" ? Math.min(state.indexCount,state.page*state.pageSize) : 0;
-    if(mode==="1000") endIndex=Math.min(state.indexCount,startIndex+1000);
+    if(state.searchMode && startPoint==="current") {
+      // In search mode, continue from the first visible search result through the remaining matches.
+      const visible=pageItems();
+      const first=visible.length ? visible[0] : (state.lastResults[0] ?? 0);
+      const pos=Math.max(0,state.lastResults.indexOf(first));
+      indices=state.lastResults.slice(pos);
+    } else {
+      const startIndex=startPoint==="current" ? Math.min(state.indexCount,state.page*state.pageSize) : 0;
+      const endIndex=mode==="1000" ? Math.min(state.indexCount,startIndex+1000) : state.indexCount;
+      indices=Array.from({length:Math.max(0,endIndex-startIndex)},(_,n)=>startIndex+n);
+    }
+    if(mode==="1000") indices=indices.slice(0,1000);
   }
-  const totalRange=Math.max(0,endIndex-startIndex);
+  const totalRange=indices.length;
   const unique=new Map(), queue=[]; let cached=0, skipped=0, scanned=0;
   const useCache=$("translateUseCache")?.checked!==false;
   if(useCache) {
@@ -987,7 +1010,7 @@ async function buildTranslationQueue() {
   $("translateProgressWrap").classList.remove("hidden");
   $("translateProgressBar").style.width="0%";
   $("translateProgressText").textContent=`Menyiapkan antrian… 0 / ${totalRange.toLocaleString("id-ID")}`;
-  for(let i=startIndex;i<endIndex;i++){
+  for(const i of indices){
     const text=decodeAt(i);
     if(!shouldTranslateText(text)){skipped++;}
     else if(state.dirty.has(i)) { skipped++; }
@@ -1009,7 +1032,7 @@ async function buildTranslationQueue() {
     }
   }
   state.queueBuilding=false;
-  return {queue,cached,skipped,total:totalRange,startIndex,endIndex};
+  return {queue,cached,skipped,total:totalRange,startIndex:indices[0]??0,endIndex:(indices[indices.length-1]??-1)+1};
 }
 async function startTranslation() {
   if(state.translationRunning || !state.original) return;
@@ -1053,7 +1076,7 @@ function updateTranslationUI(){
   $("translateTestBtn").disabled=!ok || !!state.translatorLoading;
   $("translateStartBtn").disabled=!ok || state.translationRunning || state.queueBuilding || (engine==="marian" && !state.translator);
   const mode=$("translateMode")?.value||"all";
-  const sp=$("translateStartPointWrap"); if(sp) sp.classList.toggle("hidden", mode==="page");
+  const sp=$("translateStartPointWrap"); if(sp) sp.classList.toggle("hidden", mode==="page" || mode==="searchPage");
   $("translateClearCacheBtn").disabled=!ok || state.translationRunning;
 }
 
@@ -1155,6 +1178,8 @@ let searchTimer;
 $("searchInput").addEventListener("input", e => { state.filter=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(searchMatches,280); });
 $("caseSensitive").addEventListener("change", e => { state.caseSensitive=e.target.checked; searchMatches(); });
 $("exactSearch").addEventListener("change", e => { state.exactSearch=e.target.checked; searchMatches(); });
+$("startsWithSearch")?.addEventListener("change", () => { if($("startsWithSearch").checked) $("endsWithSearch").checked=false; searchMatches(); });
+$("endsWithSearch")?.addEventListener("change", () => { if($("endsWithSearch").checked) $("startsWithSearch").checked=false; searchMatches(); });
 $("placeholdersOnly").addEventListener("change", e => { state.placeholdersOnly=e.target.checked; searchMatches(); });
 $("clearSearch").addEventListener("click", () => { $("searchInput").value=""; state.filter=""; state.searchToken++; state.searchMode=false; state.lastResults=[]; state.page=0; renderResults(); $("searchInput").focus(); });
 $("results").addEventListener("click", e => { const btn=e.target.closest(".result"); if(btn) selectRecord(Number(btn.dataset.index)); });
