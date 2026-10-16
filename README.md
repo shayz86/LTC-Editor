@@ -1,4 +1,4 @@
-# LTC Editor Football Manager 2021 — Mobile v24
+# LTC Editor Football Manager 2021 — Mobile v25
 
 Browser editor untuk file bahasa `.ltc` Football Manager 2021.
 
@@ -26,7 +26,7 @@ LTC hasil terjemahan
 
 Jika Google gagal, terkena CORS/jaringan/rate limit, atau dibatasi, V21 dapat memakai MarianMT sebagai fallback.
 
-## Fitur V24: konversi placeholder kata ganti orang
+## Fitur V25: konversi placeholder kata ganti orang
 
 Sebelum teks dikirim ke Google Translate atau MarianMT, placeholder khusus berikut dikonversi menjadi kata bahasa Inggris biasa agar diterjemahkan sesuai konteks:
 
@@ -131,3 +131,6 @@ Engine V11 yang telah diuji pada `english.ltc` dipertahankan. Rebuild menjaga:
 ## Catatan versi V24
 
 V24 menambahkan ekspansi placeholder pronoun `person#N-I`, `person#N-you`, dan `person#N-your` sebelum proses terjemahan, baik Google-first maupun MarianMT. Mesin penyimpanan/rebuild LTC tidak diubah.
+
+
+V25 juga mengonversi placeholder `[%person#N-me]` dan `[%person#N-my]` menjadi kata Inggris `me` dan `my` sebelum terjemahan. Placeholder kata ganti yang dikenali: I, you, me, my, your. Placeholder LTC lainnya tetap dipertahankan.

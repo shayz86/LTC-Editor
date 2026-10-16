@@ -123,12 +123,12 @@ function placeholders(text) { return text.match(/\[%[^\]]+\]/g) || []; }
 
 // FM person-pronoun placeholders can be converted into ordinary words before
 // translation when the user wants fixed Indonesian pronouns instead of runtime tokens.
-// I/you become normal English pronouns for Google/Marian to translate in context;
-// your is also expanded as English so the translator can form natural possessives.
+// I/you/me/my/your placeholders become ordinary English pronouns before translation,
+// allowing Google/Marian to translate them naturally in sentence context.
 function expandPersonPronounPlaceholders(text) {
-  return String(text ?? "").replace(/\[%\s*person#\d+-(I|you|your)\s*\]/gi, (_match, pronoun) => {
+  return String(text ?? "").replace(/\[%\s*person#\d+-(I|you|me|my|your)\s*\]/gi, (_match, pronoun) => {
     const key=String(pronoun).toLowerCase();
-    return key === "i" ? "I" : key === "you" ? "you" : "your";
+    return key === "i" ? "I" : key;
   });
 }
 function expectedPreservedPlaceholders(text) {
