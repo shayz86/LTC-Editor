@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v26 — Google-first Quality</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v27 — Full File & Bulk Tools</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -134,7 +134,7 @@
       <div class="progress-track"><div id="translateProgressBar" class="progress-bar"></div></div>
       <div id="translateProgressText" class="progress-text">Belum mulai.</div>
     </div>
-    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. V26 memakai Google Translate eksperimental sebagai mesin utama. Placeholder kata ganti orang dapat diubah menjadi kata biasa sebelum diterjemahkan. Mode “Halaman saat ini” mengikuti halaman yang sedang terlihat, termasuk halaman hasil pencarian. Gunakan “Halaman hasil search saja” untuk membatasi terjemahan ke hasil pencarian yang tampil. Pagination 100 juga tersedia.</div>
+    <div id="translateStats" class="translate-stats">Buka file LTC terlebih dahulu. V27 memakai Google Translate eksperimental sebagai mesin utama. Placeholder kata ganti orang dapat diubah menjadi kata biasa sebelum diterjemahkan. Mode “Halaman saat ini” mengikuti halaman yang sedang terlihat, termasuk halaman hasil pencarian. Gunakan “Halaman hasil search saja” untuk membatasi terjemahan ke hasil pencarian yang tampil. Pagination 100 juga tersedia.</div>
   </section>
 
   <section class="workspace">
@@ -150,6 +150,32 @@
         <label><input id="endsWithSearch" type="checkbox"> Posisi akhir string</label>
         <label><input id="placeholdersOnly" type="checkbox"> Ada placeholder</label>
       </div>
+      <details class="bulk-tools">
+        <summary>🛠️ Alat massal untuk semua string</summary>
+        <div class="bulk-grid">
+          <label>Hapus semua kemunculan teks
+            <input id="bulkDeleteText" type="text" placeholder="Contoh: {s}">
+          </label>
+          <button id="bulkDeleteBtn" disabled>Hapus di semua string</button>
+          <label>Ganti kata/frasa utuh
+            <input id="bulkFindText" type="text" placeholder="Contoh: match">
+          </label>
+          <label>Menjadi
+            <input id="bulkReplaceText" type="text" placeholder="Contoh: pertandingan">
+          </label>
+          <button id="bulkReplaceBtn" disabled>Ganti semua (kata utuh)</button>
+          <button id="bulkPronounsBtn" disabled>Ubah placeholder kata ganti → Indonesia</button>
+        </div>
+        <div id="bulkProgress" class="muted small">Perubahan massal akan diterapkan ke seluruh string dan dapat dibatalkan dengan tombol Batalkan perubahan.</div>
+      </details>
+      <details class="bulk-tools">
+        <summary>📄 Header dan teks non-string LTC</summary>
+        <p class="muted small">Bagian ini menampilkan teks ASCII terbaca dari header dan celah non-string (termasuk nama pembuat seperti OmJhon) yang tidak masuk daftar string terindeks. Bagian ini hanya untuk pemeriksaan; perubahan massal di atas bekerja pada string terindeks agar struktur LTC tetap aman.</p>
+        <label>Teks terbaca di luar string terindeks
+          <textarea id="headerReadable" rows="3" readonly placeholder="Buka file LTC untuk menampilkan header…"></textarea>
+        </label>
+        <div id="headerInfo" class="muted small">Header belum dibaca.</div>
+      </details>
       <div class="pagebar top-pagebar">
         <button id="prevPageBtn" disabled>← Sebelumnya</button>
         <span id="pageInfo">Halaman 0 / 0</span>
@@ -206,6 +232,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script type="module" src="app.js?v=21"></script>
+<script type="module" src="app.js?v=27"></script>
 </body>
 </html>

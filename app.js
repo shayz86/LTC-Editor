@@ -1109,6 +1109,97 @@ function resetEditor() {
   $("recordId").textContent=$("recordOffset").textContent=$("recordLength").textContent=$("recordPlaceholders").textContent="—";
   $("charInfo").textContent="0 karakter · 0 byte UTF-8"; $("warning").classList.add("hidden");
 }
+function updateHeaderPreview() {
+  if (!state.original || !state.markers.length) { $("headerReadable").value=""; $("headerInfo").textContent="Teks non-string belum dibaca."; return; }
+  const bytes=state.original, countPos=state.indexStart-4, ranges=[[0,Math.min(52,bytes.length)]];
+  let cursor=52;
+  for (let i=0;i<state.markers.length;i++) {
+    const marker=state.markers[i];
+    if (cursor<marker) ranges.push([cursor,marker]);
+    cursor=state.textOffsets[i]+state.lengths[i];
+  }
+  if (cursor<countPos) ranges.push([cursor,countPos]);
+  const lines=[];
+  for (const [from,to] of ranges) {
+    let run="", runStart=from;
+    for(let pos=from;pos<to;pos++) {
+      const b=bytes[pos];
+      if(b>=32 && b<=126) { if(!run) runStart=pos; run+=String.fromCharCode(b); }
+      else { if(run.length>=4) lines.push(`0x${runStart.toString(16).toUpperCase().padStart(8,"0")}  ${run}`); run=""; }
+    }
+    if(run.length>=4) lines.push(`0x${runStart.toString(16).toUpperCase().padStart(8,"0")}  ${run}`);
+  }
+  $("headerReadable").value=lines.join("\n") || "(Tidak ditemukan teks ASCII terbaca di luar string terindeks)";
+  const hasOmJhon=lines.some(line=>line.toLowerCase().includes("omjhon"));
+  $("headerInfo").textContent=`Teks terbaca di header/celah non-string: ${lines.length} bagian.${hasOmJhon ? " Nama OmJhon ditemukan." : ""} Data ini hanya ditampilkan; area non-string tidak diubah agar struktur LTC tetap aman.`;
+}
+
+const PERSON_PLACEHOLDER_ID_TO_ID = {
+  i:"Saya", me:"saya", my:"saya", mine:"milik saya",
+  you:"Anda", your:"Anda", yours:"milik Anda",
+  he:"dia", him:"dia", his:"dia", she:"dia", her:"dia", hers:"milik dia",
+  it:"itu", its:"miliknya", we:"kami", us:"kami", our:"kami", ours:"milik kami",
+  they:"mereka", them:"mereka", their:"mereka", theirs:"milik mereka"
+};
+function convertPronounPlaceholders(text) {
+  return text.replace(/\[%([^\]]*?)-([A-Za-z]+)\]/g, (whole, prefix, pronoun) => {
+    const replacement=PERSON_PLACEHOLDER_ID_TO_ID[pronoun.toLowerCase()];
+    return replacement === undefined ? whole : replacement;
+  });
+}
+function setBulkButtonsEnabled(enabled) {
+  ["bulkDeleteBtn","bulkReplaceBtn","bulkPronounsBtn"].forEach(id => { const el=$(id); if(el) el.disabled=!enabled; });
+}
+async function runBulkTransform(label, transform, confirmText) {
+  if (!state.original || state.indexing) return;
+  if (!confirm(confirmText)) return;
+  const btns=["bulkDeleteBtn","bulkReplaceBtn","bulkPronounsBtn"];
+  btns.forEach(id=>$(id).disabled=true);
+  const progress=$("bulkProgress");
+  let changed=0, checked=0;
+  try {
+    for (let i=0;i<state.markers.length;i++) {
+      const before=decodeAt(i), after=transform(before);
+      if (after!==before) {
+        if (after===originalTextAt(i)) state.dirty.delete(i); else state.dirty.set(i,after);
+        changed++;
+      }
+      checked++;
+      if (i%500===0) {
+        progress.textContent=`${label}: memeriksa ${checked.toLocaleString("id-ID")} / ${state.markers.length.toLocaleString("id-ID")} string · berubah ${changed.toLocaleString("id-ID")}`;
+        await new Promise(resolve=>setTimeout(resolve,0));
+      }
+    }
+    invalidateDeltaCache();
+    if (state.selected>=0) selectRecord(state.selected);
+    renderResults();
+    progress.textContent=`Selesai: ${label} · ${changed.toLocaleString("id-ID")} string diubah dari ${checked.toLocaleString("id-ID")}.`;
+    toast(`${label}: ${changed.toLocaleString("id-ID")} string diubah`);
+  } catch(e) {
+    console.error(e); progress.textContent=`Gagal menjalankan ${label}: ${e.message}`; toast("Operasi massal gagal");
+  } finally { setBulkButtonsEnabled(!!state.original); }
+}
+function setupBulkTools() {
+  $("bulkDeleteBtn").addEventListener("click",()=>{
+    const needle=$("bulkDeleteText").value;
+    if(!needle){toast("Masukkan teks yang ingin dihapus");return;}
+    runBulkTransform(`Hapus “${needle}”`,text=>text.split(needle).join(""),`Hapus semua kemunculan “${needle}” dari seluruh string LTC? Tindakan ini mengubah teks dan perlu disimpan untuk diterapkan ke file.`);
+  });
+  $("bulkReplaceBtn").addEventListener("click",()=>{
+    const find=$("bulkFindText").value, replace=$("bulkReplaceText").value;
+    if(!find){toast("Masukkan kata/frasa yang ingin diganti");return;}
+    const escaped=find.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+    let regex;
+    try { regex=new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`,"giu"); }
+    catch { regex=new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`,"gi"); }
+    runBulkTransform(`Ganti kata “${find}”`,text=>text.replace(regex,`$1${replace}`),`Ganti kata/frasa utuh “${find}” menjadi “${replace}” di seluruh string LTC? Kemunculan sebagai bagian dari kata lain tidak akan diganti.`);
+  });
+  $("bulkPronounsBtn").addEventListener("click",()=>{
+    runBulkTransform("Ubah placeholder kata ganti",convertPronounPlaceholders,"Ubah semua placeholder yang berakhiran kata ganti orang (I/me/my/you/your/he/him/his/she/her/we/they dan lainnya) menjadi kata Indonesia, lalu hapus token placeholder tersebut di seluruh string? Pastikan ini memang yang kamu inginkan karena placeholder tersebut tidak dapat dipulihkan otomatis.");
+  });
+}
+setupBulkTools();
+
 async function loadFile(file, fromCache=false) {
   const reader = new FileReader();
   reader.onload = async () => {
@@ -1120,7 +1211,7 @@ async function loadFile(file, fromCache=false) {
       setFileInfo(`${file.name} · ${buf.byteLength.toLocaleString("id-ID")} byte · membuat indeks ringan…`);
       const result = await buildIndexAsync(buf, (pct,count)=>{ $("progressBar").style.width=`${pct}%`; $("progressText").textContent=`Menganalisis… ${pct}% · ${count.toLocaleString("id-ID")} string`; });
       if (result.markers.length < 2) throw new Error("Tidak cukup string LTC yang terdeteksi.");
-      state.markers=result.markers; state.textOffsets=result.textOffsets; state.lengths=result.lengths; state.indexStart=result.indexStart; state.indexCount=result.indexCount; state.indexIds=result.ids; state.indexFlags=result.flags; state.indexing=false; invalidateDeltaCache();
+      state.markers=result.markers; state.textOffsets=result.textOffsets; state.lengths=result.lengths; state.indexStart=result.indexStart; state.indexCount=result.indexCount; state.indexIds=result.ids; state.indexFlags=result.flags; state.indexing=false; invalidateDeltaCache(); updateHeaderPreview(); setBulkButtonsEnabled(true);
       $("progressWrap").classList.add("hidden"); $("searchInput").disabled=false; $("clearSearch").disabled=false; $("saveBtn").disabled=false; $("revertBtn").disabled=false;
       setFileInfo(`${file.name} · ${buf.byteLength.toLocaleString("id-ID")} byte · ${state.markers.length.toLocaleString("id-ID")} string · ${state.pageSize}/halaman`);
       state.filter=""; $("searchInput").value="";
@@ -1130,7 +1221,7 @@ async function loadFile(file, fromCache=false) {
       toast(fromCache ? `LTC dipulihkan · ${state.markers.length.toLocaleString("id-ID")} string` : `LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
     } catch(e) {
       console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden");
-      state.original=null; state.markers=[]; state.textOffsets=[]; state.lengths=[]; state.indexStart=0; state.indexCount=0; state.indexIds=[]; state.indexFlags=[]; invalidateDeltaCache(); state.page=0; state.searchMode=false; state.lastResults=[];
+      state.original=null; updateHeaderPreview(); setBulkButtonsEnabled(false); state.markers=[]; state.textOffsets=[]; state.lengths=[]; state.indexStart=0; state.indexCount=0; state.indexIds=[]; state.indexFlags=[]; invalidateDeltaCache(); state.page=0; state.searchMode=false; state.lastResults=[];
       setFileInfo("File belum dimuat. Silakan buka file LTC lagi."); renderResults();
       updateTranslationUI(); toast("File tidak cocok dengan parser LTC ini");
     }

@@ -54,3 +54,13 @@ body.light{color:#17202a;background:#f4f7fa}body.light .topbar{background:#fffff
 body.light .translator-grid select,body.light .settings-row input{background:#f8fafc;color:#17202a;border-color:#cdd7df}
 @media(max-width:700px){.translator-grid{grid-template-columns:1fr}.settings-row{flex-direction:column}.translator-head{align-items:flex-start}.translator-actions button{flex:1}}
 .checkline{display:flex;align-items:center;gap:7px;color:#8f9dad;font-size:11px}.checkline input{accent-color:#6ea8fe}.translator .progress-wrap{margin-top:9px}.translator .progress-track{height:8px}.translator .progress-text{white-space:pre-line}
+
+.bulk-tools{margin:4px 10px 8px;border:1px solid #26313d;border-radius:10px;padding:9px;background:rgba(10,15,21,.55);font-size:12px}
+.bulk-tools summary{cursor:pointer;font-weight:700;color:#b8c9da;padding:2px 0 6px}
+.bulk-grid{display:grid;grid-template-columns:1fr;gap:7px}
+.bulk-grid label,.bulk-tools>label{display:flex;flex-direction:column;gap:4px;color:#91a0af}
+.bulk-grid input,.bulk-tools textarea{width:100%;min-width:0;background:#0c1117;color:#e8edf3;border:1px solid #2b3744;border-radius:8px;padding:8px}
+.bulk-grid button{width:100%;font-size:12px;padding:8px}
+#bulkProgress{line-height:1.5;overflow-wrap:anywhere;margin-top:8px}
+#headerReadable{resize:vertical;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;min-height:80px}
+body.light .bulk-tools{background:#f8fafc;border-color:#dce3e9}body.light .bulk-grid input,body.light .bulk-tools textarea{background:#fff;color:#17202a;border-color:#cdd7df}

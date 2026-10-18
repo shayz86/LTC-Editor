@@ -1,4 +1,4 @@
-# LTC Editor Football Manager 2021 — Mobile v26
+# LTC Editor Football Manager 2021 — Mobile v27
 
 Browser editor untuk file bahasa `.ltc` Football Manager 2021.
 
@@ -148,3 +148,13 @@ V25 juga mengonversi placeholder `[%person#N-me]` dan `[%person#N-my]` menjadi k
 - Mode terjemahan `Halaman saat ini` sekarang menerjemahkan indeks yang sedang terlihat, termasuk jika daftar sedang difilter dengan search.
 - Mode `Halaman hasil search saja` secara eksplisit hanya menerjemahkan hasil pada halaman pencarian yang sedang terlihat. Jika tidak ada pencarian aktif, mode ini tidak membuat antrian.
 - Pencarian memiliki opsi `Posisi awal string` dan `Posisi akhir string`. Keduanya memeriksa awal/akhir isi string setelah spasi tepi diabaikan. Mode ini bisa dipakai bersama filter placeholder.
+
+
+## Fitur V27: tampilan teks non-string dan alat massal
+
+- Panel `Header dan teks non-string LTC` menampilkan rangkaian ASCII terbaca dari header dan celah di luar string terindeks, termasuk metadata seperti `Bahasa Indonesia By : OmJhon` jika ada. Data biner/index tidak ditampilkan sebagai teks palsu.
+- `Hapus di semua string`: menghapus semua kemunculan literal, misalnya `{s}`, dari seluruh string terindeks.
+- `Ganti semua (kata utuh)`: mengganti kata/frasa utuh di semua string, misalnya `match` → `pertandingan`, tanpa mengubah kata seperti `matches` atau `matchday`.
+- `Ubah placeholder kata ganti → Indonesia`: mengubah suffix placeholder kata ganti menjadi teks Indonesia dan menghapus token placeholder terkait di seluruh string. Operasi ini destruktif terhadap token tersebut, jadi ada konfirmasi sebelum berjalan.
+- Operasi massal menampilkan progres, menerapkan perubahan ke semua record, dan hasilnya tetap harus disimpan/diunduh untuk menjadi file baru.
+- Bagian header/non-string hanya ditampilkan; tidak diedit oleh alat massal supaya struktur LTC tetap aman.
