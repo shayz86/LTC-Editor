@@ -12,7 +12,7 @@ const state = {
   filter: "", caseSensitive: false, placeholdersOnly: false,
   dirty: new Map(), lastResults: [], searchMode: false,
   searchToken: 0, indexing: false, exactSearch: false,
-  translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0,
+  translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0, outsideEdits: new Map(), outsideRuns: [],
   translationCache: new Map(), translationQueue: [], translationDb: null,
   translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 178700, onlineBlocked: false, onlineLastAt: 0, onlineLastEndpoint: "", onlineLastError: "", fallbackUsed: 0, queueBuilding: false
 };
@@ -403,8 +403,9 @@ function computeNewSize() {
 }
 
 async function buildFileAsync(onProgress) {
-  if (!state.dirty.size) return new Uint8Array(state.original);
-  const old = state.original;
+  if (!state.dirty.size && !state.outsideEdits.size) return new Uint8Array(state.original);
+  const old = new Uint8Array(state.original);
+  for (const run of (state.outsideRuns||[])) { const replacement=state.outsideEdits.get(run.offset); if(replacement!==undefined){ const b=enc.encode(replacement); if(b.length!==run.text.length) throw new Error("Edit teks non-string harus memiliki panjang byte yang sama."); old.set(b,run.offset); } }
   const oldIndexStart = state.indexStart;
   const oldCountPos = oldIndexStart - 4;
   const changed = state.dirty;
@@ -718,6 +719,7 @@ function cleanMarianArtifacts(text) {
   return out;
 }
 function applyFootballGrammar(text) {
+  // Preserve paragraph breaks and intentional blank lines; only normalize horizontal whitespace.
   let out=cleanMarianArtifacts(text);
   out=out.replace(/\b(?:di|pada|ke|dari|oleh|dengan)\s+(\[%[^\]]+\])/gi,(m,p)=>{
     const low=p.toLowerCase();
@@ -726,7 +728,7 @@ function applyFootballGrammar(text) {
     if(/stadium|venue|ground/.test(low)) return `di ${p}`;
     return m;
   });
-  return out.replace(/\s{2,}/g," ").trim();
+  return out.split(/(\r?\n)/).map((line,i)=>/^\r?\n$/.test(line)?line:line.replace(/[\t\f\v ]{2,}/g," ").replace(/^[ \t]+|[ \t]+$/g,"")).join("");
 }
 
 
@@ -800,10 +802,10 @@ async function fetchGoogleEndpoint(endpoint, text) {
   const data=await response.json();
   return parseGoogleTranslateResponse(data,endpoint.type);
 }
-async function translateOnlineFragment(text) {
+async function translateOnlineFragmentRaw(text) {
   const core=String(text||"").trim();
   if(!shouldTranslateText(core)) return text;
-  if(core.length>ONLINE_MAX_CHARS) throw new Error(`String Google terlalu panjang (${core.length} karakter).`);
+  if(core.length>ONLINE_MAX_CHARS) throw new Error(`Potongan Google masih terlalu panjang (${core.length} karakter).`);
   if(state.onlineUsed>=state.onlineBudget) throw new Error("Batas Google sesi sudah tercapai.");
   if(state.onlineBlocked) throw new Error("Akses Google sedang dibatasi pada sesi ini.");
   const wait=Math.max(0,getOnlineDelay()-(Date.now()-state.onlineLastAt));
@@ -815,20 +817,51 @@ async function translateOnlineFragment(text) {
       try {
         const out=await fetchGoogleEndpoint(endpoint,core);
         if(!out) throw new Error("Google mengembalikan terjemahan kosong.");
-        state.onlineUsed++;
-        state.onlineLastAt=Date.now();
-        state.onlineLastEndpoint=endpoint.name;
+        state.onlineUsed++; state.onlineLastAt=Date.now(); state.onlineLastEndpoint=endpoint.name;
         return out;
-      } catch(e) {
-        lastError=e;
-        // Try the second Google endpoint before declaring the whole service blocked.
-      }
+      } catch(e) { lastError=e; }
     }
     if(attempt<retries) await sleep(Math.min(8000,1200*Math.pow(2,attempt)));
   }
   if(lastError?.httpStatus===403 || lastError?.httpStatus===429 || lastError?.name==="TypeError") state.onlineBlocked=true;
   throw new Error(`Google tidak dapat diakses: ${lastError?.httpStatus?`HTTP ${lastError.httpStatus} · `:""}${lastError?.message||"jaringan/CORS"}`);
 }
+function splitLongTextPreservingSeparators(text, max=3500) {
+  // First preserve paragraph/line separators; then split oversized paragraphs at sentence boundaries.
+  const chunks=[]; const lines=String(text).split(/(\r?\n+)/);
+  let current="";
+  const pushCurrent=()=>{if(current){chunks.push(current);current="";}};
+  for(const part of lines){
+    if(/^\r?\n+$/.test(part)){ current+=part; continue; }
+    if((current+part).length<=max){current+=part;continue;}
+    pushCurrent();
+    if(part.length<=max){current=part;continue;}
+    const sentences=part.split(/(?<=[.!?。！？])\s+/);
+    let sub="";
+    for(const sentence of sentences){
+      if((sub+ (sub?" ":"")+sentence).length<=max){sub+=(sub?" ":"")+sentence;}
+      else {if(sub)chunks.push(sub); if(sentence.length<=max)sub=sentence; else { for(let i=0;i<sentence.length;i+=max) chunks.push(sentence.slice(i,i+max)); sub=""; }}
+    }
+    current=sub;
+  }
+  pushCurrent();
+  return chunks.length?chunks:[String(text)];
+}
+async function translateOnlineFragment(text) {
+  const source=String(text||"");
+  if(source.length<=ONLINE_MAX_CHARS) return translateOnlineFragmentRaw(source);
+  const chunks=splitLongTextPreservingSeparators(source,Math.min(3500,ONLINE_MAX_CHARS-100));
+  let out="";
+  for(const chunk of chunks){
+    if(/^\r?\n+$/.test(chunk)){out+=chunk;continue;}
+    // Keep leading/trailing whitespace and translate only the content.
+    const {leading,core,trailing}=splitOuterWhitespace(chunk);
+    if(!core){out+=chunk;continue;}
+    out+=leading+await translateOnlineFragmentRaw(core)+trailing;
+  }
+  return out;
+}
+
 function googleMaskPlaceholders(text) {
   const map=[];
   const masked=text.replace(/\[%[^\]]+\]/g, m=>{
@@ -1088,7 +1121,7 @@ function downloadBytes(bytes, name) {
 async function saveFile() {
   applyCurrent();
   if (!state.original) return;
-  if (!state.dirty.size) { toast("Belum ada perubahan untuk disimpan"); return; }
+  if (!state.dirty.size && !state.outsideEdits.size) { toast("Belum ada perubahan untuk disimpan"); return; }
   const saveBtn = $("saveBtn");
   saveBtn.disabled = true;
   $("progressWrap").classList.remove("hidden"); $("progressBar").style.width = "0%";
@@ -1113,25 +1146,26 @@ function updateHeaderPreview() {
   if (!state.original || !state.markers.length) { $("headerReadable").value=""; $("headerInfo").textContent="Teks non-string belum dibaca."; return; }
   const bytes=state.original, countPos=state.indexStart-4, ranges=[[0,Math.min(52,bytes.length)]];
   let cursor=52;
-  for (let i=0;i<state.markers.length;i++) {
-    const marker=state.markers[i];
-    if (cursor<marker) ranges.push([cursor,marker]);
-    cursor=state.textOffsets[i]+state.lengths[i];
+  for (let i=0;i<state.markers.length;i++) { const marker=state.markers[i]; if(cursor<marker) ranges.push([cursor,marker]); cursor=state.textOffsets[i]+state.lengths[i]; }
+  if(cursor<countPos) ranges.push([cursor,countPos]);
+  const runs=[];
+  for(const [from,to] of ranges){let run="",runStart=from;for(let pos=from;pos<to;pos++){const b=bytes[pos];if(b>=32&&b<=126){if(!run)runStart=pos;run+=String.fromCharCode(b);}else{if(run.length>=4)runs.push({offset:runStart,text:run});run="";}}if(run.length>=4)runs.push({offset:runStart,text:run});}
+  state.outsideRuns=runs;
+  $("headerReadable").value=runs.map(r=>`0x${r.offset.toString(16).toUpperCase().padStart(8,"0")}  ${state.outsideEdits.has(r.offset)?state.outsideEdits.get(r.offset):r.text}`).join("\n") || "(Tidak ditemukan teks ASCII terbaca di luar string terindeks)";
+  const hasOmJhon=runs.some(r=>r.text.toLowerCase().includes("omjhon"));
+  $("headerInfo").textContent=`Ditemukan ${runs.length} bagian teks ASCII di luar string terindeks.${hasOmJhon?" Nama OmJhon ditemukan.":""} Edit teks setelah alamat 0x, lalu tekan Terapkan. Panjang tiap bagian harus tetap sama; penghapusan mengisi spasi agar struktur file tidak bergeser.`;
+}
+function applyOutsideTextEdits(){
+  if(!state.original||!state.outsideRuns?.length)return;
+  const lines=$("headerReadable").value.split(/\r?\n/), edits=new Map();
+  for(const line of lines){const m=line.match(/^0x([0-9a-f]{1,8})\s{2}(.*)$/i);if(!m)continue;const offset=parseInt(m[1],16),run=state.outsideRuns.find(r=>r.offset===offset);if(!run)continue;let value=m[2];
+    if(value.length>run.text.length){toast(`Teks pada 0x${offset.toString(16)} terlalu panjang. Maksimal ${run.text.length} karakter.`);return;}
+    if(value.length<run.text.length)value=value.padEnd(run.text.length," ");
+    if(value!==run.text) edits.set(offset,value);
   }
-  if (cursor<countPos) ranges.push([cursor,countPos]);
-  const lines=[];
-  for (const [from,to] of ranges) {
-    let run="", runStart=from;
-    for(let pos=from;pos<to;pos++) {
-      const b=bytes[pos];
-      if(b>=32 && b<=126) { if(!run) runStart=pos; run+=String.fromCharCode(b); }
-      else { if(run.length>=4) lines.push(`0x${runStart.toString(16).toUpperCase().padStart(8,"0")}  ${run}`); run=""; }
-    }
-    if(run.length>=4) lines.push(`0x${runStart.toString(16).toUpperCase().padStart(8,"0")}  ${run}`);
-  }
-  $("headerReadable").value=lines.join("\n") || "(Tidak ditemukan teks ASCII terbaca di luar string terindeks)";
-  const hasOmJhon=lines.some(line=>line.toLowerCase().includes("omjhon"));
-  $("headerInfo").textContent=`Teks terbaca di header/celah non-string: ${lines.length} bagian.${hasOmJhon ? " Nama OmJhon ditemukan." : ""} Data ini hanya ditampilkan; area non-string tidak diubah agar struktur LTC tetap aman.`;
+  state.outsideEdits=edits;
+  $("headerInfo").textContent=`Perubahan teks non-string disiapkan: ${edits.size} bagian. Perubahan akan diterapkan saat menyimpan LTC.`;
+  toast("Perubahan teks di luar string disiapkan");
 }
 
 const PERSON_PLACEHOLDER_ID_TO_ID = {
@@ -1199,6 +1233,7 @@ function setupBulkTools() {
   });
 }
 setupBulkTools();
+$("applyOutsideBtn")?.addEventListener("click", applyOutsideTextEdits);
 
 async function loadFile(file, fromCache=false) {
   const reader = new FileReader();
