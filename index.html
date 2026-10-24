@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v28 — Full File & Bulk Tools</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v29 — Google-only mode · Full File Full File & Bulk Tools Bulk Tools</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -36,14 +36,14 @@
     <div class="translator-head">
       <div>
         <strong>🌐 Terjemahan Google Eksperimental — Football Manager 2021</strong>
-        <div class="muted small">Google Translate eksperimental sebagai mesin utama · cache · resume · glossary FM2021 · MarianMT sebagai fallback opsional.</div>
+        <div class="muted small">Google-first dengan retry otomatis, strategi pemulihan placeholder, pemecahan teks panjang, cache dan resume. MarianMT opsional dan nonaktif secara default.</div>
       </div>
       <button id="translateSettingsBtn" type="button">⚙ Pengaturan</button>
     </div>
     <div class="translator-grid">
       <label>Engine terjemahan
         <select id="translateEngine">
-          <option value="google" selected>Google Translate eksperimental — Recommended</option>
+          <option value="google" selected>Google Translate eksperimental — Recommended (dengan retry)</option>
           <option value="marian">MarianMT — Offline / fallback</option>
         </select>
       </label>
@@ -92,7 +92,7 @@
     <div id="translateSettingsExtra" class="hidden settings-row">
       <label class="checkline"><input id="translateOnlyEnglish" type="checkbox" checked> Lewati teks yang tampak non-Inggris / kode</label>
       <label class="checkline"><input id="translateUseCache" type="checkbox" checked> Gunakan cache + lanjutkan setelah Chrome reload</label>
-      <label class="checkline"><input id="translateFallbackMarian" type="checkbox" checked> Gunakan MarianMT jika Google gagal / dibatasi</label>
+      <label class="checkline"><input id="translateFallbackMarian" type="checkbox"> Gunakan MarianMT jika semua percobaan Google gagal (opsional; hasil bisa berbeda)</label>
       <label>Batas Google per sesi
         <select id="translateOnlineBudget">
           <option value="1000">1.000 string</option>

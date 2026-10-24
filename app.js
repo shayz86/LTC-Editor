@@ -748,7 +748,7 @@ function getTranslationEngine() { return $("translateEngine")?.value || "google"
 function getOnlineBudget() { return Math.max(1, Number($("translateOnlineBudget")?.value) || 178700); }
 function getOnlineDelay() { return Math.max(350, Number($("translateOnlineDelay")?.value) || ONLINE_DELAY_MS); }
 function getOnlineRetries() { const n=Number($("translateOnlineRetries")?.value); return Math.max(0, Math.min(4, Number.isFinite(n)?n:ONLINE_RETRIES)); }
-function getFallbackEnabled() { return $("translateFallbackMarian")?.checked !== false; }
+function getFallbackEnabled() { return $("translateFallbackMarian")?.checked === true; }
 
 function englishWordSet(text) {
   const words = (text.toLowerCase().match(/[a-z][a-z'-]{2,}/g) || []);
@@ -882,19 +882,55 @@ function restoreGooglePlaceholders(text,map) {
   return out;
 }
 async function translateTextOnlineKeepingPlaceholders(text) {
-  // Convert person pronoun placeholders to plain English before translation.
-  // Other LTC placeholders remain protected and must be restored exactly.
+  // Google-only recovery strategy: if Google alters masking tokens, retry by
+  // translating each text segment around the original LTC placeholders.
+  // This avoids asking Google to reproduce any synthetic placeholder token.
   text=expandPersonPronounPlaceholders(text);
   const originalPh=placeholders(text);
   if(!originalPh.length) return applyFootballGrammar(await translateOnlineFragment(text));
-  const {masked,map}=googleMaskPlaceholders(text);
-  const translated=await translateOnlineFragment(masked);
-  const restored=restoreGooglePlaceholders(translated,map);
-  if(restored===null) throw new Error("Google mengubah placeholder LTC.");
-  const out=applyFootballGrammar(restored);
-  const outPh=placeholders(out);
-  if(outPh.length!==originalPh.length || outPh.some((x,i)=>x!==originalPh[i])) throw new Error("Placeholder Google tidak identik dengan sumber.");
-  return out;
+
+  let lastError=null;
+  // Strategy 1: mask placeholders with a token, retrying with different token families.
+  const tokenFamilies=["ZZLTCVAR","QZXMARK","LTCXHOLD"];
+  for(let strategy=0;strategy<tokenFamilies.length;strategy++) {
+    try {
+      const map=[];
+      const masked=text.replace(/\[%[^\]]+\]/g,m=>{
+        const token=`${tokenFamilies[strategy]}${map.length}ENDX`;
+        map.push({token,value:m}); return token;
+      });
+      const translated=await translateOnlineFragment(masked);
+      const restored=restoreGooglePlaceholders(translated,map);
+      if(restored===null) throw new Error("Google mengubah token placeholder.");
+      const out=applyFootballGrammar(restored);
+      const outPh=placeholders(out);
+      if(outPh.length!==originalPh.length || outPh.some((x,i)=>x!==originalPh[i])) throw new Error("Validasi placeholder gagal setelah pemulihan.");
+      return out;
+    } catch(e) { lastError=e; }
+  }
+
+  // Strategy 2: do not send placeholders to Google at all. Translate only the
+  // text between them, preserving every original token and newline verbatim.
+  try {
+    const parts=placeholderParts(text); let out="";
+    for(const part of parts) {
+      if(part.type==="placeholder") { out+=part.value; continue; }
+      if(!part.value || !shouldTranslateText(part.value)) { out+=part.value; continue; }
+      // Translate each paragraph separately so blank lines remain untouched.
+      const chunks=part.value.split(/(\r?\n+)/);
+      for(const chunk of chunks) {
+        if(/^\r?\n+$/.test(chunk) || !shouldTranslateText(chunk)) { out+=chunk; continue; }
+        const {leading,core,trailing}=splitOuterWhitespace(chunk);
+        if(!core) { out+=chunk; continue; }
+        out+=leading+await translateOnlineFragment(core)+trailing;
+      }
+    }
+    const finalOut=applyFootballGrammar(out);
+    const finalPh=placeholders(finalOut);
+    if(finalPh.length!==originalPh.length || finalPh.some((x,i)=>x!==originalPh[i])) throw new Error("Validasi placeholder gagal pada mode segmentasi.");
+    return finalOut;
+  } catch(e) { lastError=e; }
+  throw new Error(`Google gagal setelah percobaan pemulihan placeholder: ${lastError?.message||"error tidak diketahui"}`);
 }
 async function maybeOnlineImprove(source, localOutput) {
   if(getTranslationEngine()==="marian") return localOutput;
@@ -978,7 +1014,12 @@ async function translateBatchLocal(items) {
           throw new Error(`Google gagal (${e.message}) dan Marian fallback juga gagal: ${fallbackError.message}`);
         }
       } else {
-        throw e;
+        // Google-only mode: do not silently replace Google with MarianMT.
+        // Keep the source text intact and continue the queue so one bad string
+        // (often a placeholder/token mismatch) cannot abort the whole translation.
+        outputs[i]=item.text;
+        state.googleFailed=(state.googleFailed||0)+1;
+        state.onlineLastError=`Google gagal pada string #${item.id}: ${e.message}`;
       }
     }
     await new Promise(r=>setTimeout(r,0));
@@ -1070,7 +1111,7 @@ async function buildTranslationQueue() {
 async function startTranslation() {
   if(state.translationRunning || !state.original) return;
   state.translationPaused=false; state.translationRunning=true;
-  state.onlineBudget=getOnlineBudget(); state.onlineUsed=0; state.onlineBlocked=false; state.onlineLastError=""; state.fallbackUsed=0;
+  state.onlineBudget=getOnlineBudget(); state.onlineUsed=0; state.onlineBlocked=false; state.onlineLastError=""; state.fallbackUsed=0; state.googleFailed=0;
   $("translateStartBtn").disabled=true; $("translatePauseBtn").disabled=false;
   $("translateProgressWrap").classList.remove("hidden");
   try {
@@ -1095,7 +1136,7 @@ async function startTranslation() {
       const googleNote=` · Google ${state.onlineUsed}/${state.onlineBudget}${state.onlineBlocked?" · dibatasi":""}`;
       const fallbackNote=state.fallbackUsed?` · fallback Marian ${state.fallbackUsed}`:"";
       $("translateProgressText").textContent=`Menerjemahkan ${cursor.toLocaleString("id-ID")} / ${plan.queue.length.toLocaleString("id-ID")} · ${pct}%${googleNote}${fallbackNote}`;
-      $("translateStats").textContent=`Google-first · selesai: ${cursor.toLocaleString("id-ID")} · Google: ${state.onlineUsed.toLocaleString("id-ID")}/${state.onlineBudget.toLocaleString("id-ID")}${state.onlineBlocked?" · akses dibatasi":""} · fallback Marian: ${state.fallbackUsed.toLocaleString("id-ID")}${state.onlineLastError?`\nPesan terakhir: ${state.onlineLastError}`:""}`;
+      $("translateStats").textContent=`Google-first · selesai: ${cursor.toLocaleString("id-ID")} · Google: ${state.onlineUsed.toLocaleString("id-ID")}/${state.onlineBudget.toLocaleString("id-ID")}${state.onlineBlocked?" · akses dibatasi":""} · fallback Marian: ${state.fallbackUsed.toLocaleString("id-ID")} · gagal Google: ${(state.googleFailed||0).toLocaleString("id-ID")}${state.onlineLastError?`\nPesan terakhir: ${state.onlineLastError}`:""}`;
       refreshPageOffsets(); await new Promise(r=>setTimeout(r,0));
     }
     toast(`Terjemahan selesai · ${plan.queue.length.toLocaleString("id-ID")} teks unik`);
