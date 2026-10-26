@@ -9,7 +9,7 @@ const state = {
   markers: [], textOffsets: [], lengths: [],
   indexStart: 0, indexCount: 0, indexEntrySize: 9, indexIds: [], indexFlags: [],
   selected: -1, page: 0, pageSize: 20,
-  filter: "", caseSensitive: false, placeholdersOnly: false,
+  filter: "", caseSensitive: false, placeholdersOnly: false, untranslatedOnly: false,
   dirty: new Map(), lastResults: [], searchMode: false,
   searchToken: 0, indexing: false, exactSearch: false,
   translationPaused: false, translationRunning: false, translationDone: 0, translationTotal: 0, outsideEdits: new Map(), outsideRuns: [],
@@ -401,11 +401,27 @@ function goPage(page) {
   // Keep the current viewport position when changing pagination.
 }
 
+function isLikelyUntranslated(text, index) {
+  const clean = String(text || "").trim();
+  if (!clean) return false;
+  // A loaded English LTC is the strongest reference: identical source/target means not translated.
+  if (referenceLTC) {
+    const ref = referenceLTC.map.get(String(idFor(index)));
+    if (typeof ref === "string" && clean === ref.trim()) return true;
+  }
+  // Fallback heuristic when no reference is loaded. Avoid claiming perfect language detection.
+  const words = clean.match(/[A-Za-z]{3,}/g) || [];
+  if (!words.length) return false;
+  const commonEnglish = /\b(the|and|you|your|have|has|will|would|with|from|this|that|match|manager|club|player|transfer|team|contract|confirmed|appointment|continue|select|next|previous|home|away|training|squad|league|season|goal|goals|offer|accepted|rejected)\b/i;
+  const hits = words.filter(w => commonEnglish.test(w)).length;
+  return hits >= 2 || (hits >= 1 && words.length <= 5);
+}
+
 async function searchMatches() {
   if (state.indexing) return;
   const q = state.filter.trim();
   const token = ++state.searchToken;
-  if (!q && !state.placeholdersOnly) {
+  if (!q && !state.placeholdersOnly && !state.untranslatedOnly) {
     state.searchMode = false; state.lastResults = []; state.page = 0; renderResults(); return;
   }
   state.searchMode = true; state.page = 0;
@@ -428,7 +444,8 @@ async function searchMatches() {
       else match = hay.includes(needle);
     }
     const ph = !state.placeholdersOnly || placeholders(text).length > 0;
-    if (match && ph) results.push(i);
+    const untranslated = !state.untranslatedOnly || isLikelyUntranslated(text, i);
+    if (match && ph && untranslated) results.push(i);
     if (i % 800 === 0) await new Promise(r => setTimeout(r, 0));
   }
   if (token !== state.searchToken) return;
@@ -1467,6 +1484,7 @@ $("exactSearch").addEventListener("change", e => { state.exactSearch=e.target.ch
 $("startsWithSearch")?.addEventListener("change", () => { if($("startsWithSearch").checked) $("endsWithSearch").checked=false; searchMatches(); });
 $("endsWithSearch")?.addEventListener("change", () => { if($("endsWithSearch").checked) $("startsWithSearch").checked=false; searchMatches(); });
 $("placeholdersOnly").addEventListener("change", e => { state.placeholdersOnly=e.target.checked; searchMatches(); });
+$("untranslatedOnly")?.addEventListener("change", e => { state.untranslatedOnly=e.target.checked; searchMatches(); });
 $("clearSearch").addEventListener("click", () => { $("searchInput").value=""; state.filter=""; state.searchToken++; state.searchMode=false; state.lastResults=[]; state.page=0; renderResults(); $("searchInput").focus(); });
 $("results").addEventListener("click", e => { const btn=e.target.closest(".result"); if(btn) selectRecord(Number(btn.dataset.index)); });
 $("editorText").addEventListener("input", () => { updateCharInfo(); updateWarning(); });

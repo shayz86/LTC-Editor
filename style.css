@@ -69,3 +69,9 @@ body.light .bulk-tools{background:#f8fafc;border-color:#dce3e9}body.light .bulk-
 .reference-grid textarea { width:100%; box-sizing:border-box; margin-top:6px; min-height:90px; }
 #restoreChangesBtn { border-color: var(--accent, #4b9cff); }
 .deviation-card{margin-top:16px}.deviation-results{display:grid;gap:10px;margin-top:12px}.deviation-item{border:1px solid var(--border,#29313c);border-radius:12px;padding:12px;display:grid;gap:8px;overflow-wrap:anywhere}.deviation-title{font-weight:700;font-size:.9rem}.deviation-source,.deviation-target{white-space:pre-wrap;overflow-wrap:anywhere;font-size:.92rem;line-height:1.5;padding:8px;border-radius:8px;background:var(--panel,#101820)}.deviation-source{border-left:3px solid #4b9be8}.deviation-target{border-left:3px solid #e5a13a}.deviation-actions{display:flex;gap:8px;flex-wrap:wrap}.deviation-actions button{flex:1;min-width:140px}.deviation-card .settings-row{display:flex;gap:12px;flex-wrap:wrap;margin:10px 0}.deviation-card .settings-row label{flex:1;min-width:140px}
+
+
+.comparison-dropdown { margin: 12px 0; border: 1px solid var(--border, #344054); border-radius: 12px; padding: 10px 12px; background: var(--card, #111827); }
+.comparison-dropdown > summary { cursor: pointer; font-weight: 700; padding: 6px 2px; }
+.comparison-content { display: grid; gap: 12px; margin-top: 12px; }
+.comparison-content > .card { margin: 0; }

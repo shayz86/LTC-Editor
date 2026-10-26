@@ -150,6 +150,7 @@
         <label><input id="startsWithSearch" type="checkbox"> Posisi awal string</label>
         <label><input id="endsWithSearch" type="checkbox"> Posisi akhir string</label>
         <label><input id="placeholdersOnly" type="checkbox"> Ada placeholder</label>
+        <label><input id="untranslatedOnly" type="checkbox"> Hanya string belum diterjemahkan</label>
       </div>
       <details class="bulk-tools">
         <summary>🛠️ Alat massal untuk semua string</summary>
@@ -206,6 +207,9 @@
       </div>
     </aside>
 
+    <details class="comparison-dropdown">
+      <summary>🔎 Perbandingan LTC &amp; audit terjemahan (buka saat diperlukan)</summary>
+      <div class="comparison-content">
     <section class="card reference-card">
       <strong>🧩 Bandingkan dengan LTC referensi</strong>
       <p class="muted small">Muat file LTC lain (misalnya file bahasa Inggris). Editor mencocokkan ID string yang sama dan menampilkan teks referensi untuk membantu memperbaiki terjemahan yang menyimpang.</p>
@@ -234,6 +238,8 @@
       <div class="pagebar"><button id="deviationPrevBtn" disabled>← Sebelumnya</button><span id="deviationPageInfo">Halaman 0 / 0</span><button id="deviationNextBtn" disabled>Berikutnya →</button></div>
       <div id="deviationResults" class="deviation-results"></div>
     </section>
+      </div>
+    </details>
 
     <section class="editor card">
       <div class="editor-head">

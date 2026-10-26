@@ -1,4 +1,4 @@
-# LTC Editor Football Manager 2021 Mobile V32
+# LTC Editor Football Manager 2021 Mobile V33
 
 Browser-based LTC editor with Google Translate experimental support, local change snapshots, LTC reference comparison, and a paginated audit panel for suspected translation deviations.
 
@@ -15,3 +15,6 @@ The audit is heuristic. It flags likely issues such as changed/missing placehold
 - Reference matching uses LTC string IDs.
 - The V11 LTC save/rebuild engine is retained.
 - Test the saved file in Football Manager 2021 before relying on it.
+
+
+V33: Menambahkan filter utama untuk string yang diduga belum diterjemahkan. Panel perbandingan LTC dan audit kini berada dalam dropdown agar tidak mengganggu saat tidak digunakan. Navigasi pagination utama tersedia di atas dan bawah, termasuk lompat ke halaman tertentu. Deteksi string belum diterjemahkan menggunakan perbandingan LTC referensi jika tersedia, atau heuristik sederhana jika tidak.
