@@ -17,6 +17,110 @@ const state = {
   translator: null, translatorLoading: false, translatorDevice: "wasm", translatorModel: "Xenova/opus-mt-en-id", onlineUsed: 0, onlineBudget: 178700, onlineBlocked: false, onlineLastAt: 0, onlineLastEndpoint: "", onlineLastError: "", fallbackUsed: 0, queueBuilding: false
 };
 
+const SNAPSHOT_KEY = "last-edits-v1";
+let snapshotTimer = null;
+let referenceLTC = null;
+let deviationRows = [];
+let deviationPage = 0;
+function scheduleChangeSnapshot() {
+  clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => saveChangeSnapshot().catch(e=>console.warn("Snapshot perubahan gagal",e)), 450);
+}
+async function saveChangeSnapshot() {
+  if(!state.original || !state.fileName) return;
+  try {
+    const db=await openDB();
+    const payload={fileName:state.fileName, byteLength:state.original.byteLength, savedAt:Date.now(), dirty:[...state.dirty.entries()], outsideEdits:[...state.outsideEdits.entries()]};
+    await new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,"readwrite");tx.objectStore(DB_STORE).put(payload,SNAPSHOT_KEY);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)}); db.close();
+    const b=$("restoreChangesBtn"); if(b)b.disabled=false;
+  } catch(e) { console.warn("Gagal menyimpan cache perubahan",e); }
+}
+async function restoreChangeSnapshot() {
+  if(!state.original){toast("Buka file LTC yang sesuai terlebih dahulu");return;}
+  try {
+    const db=await openDB();
+    const snap=await new Promise((resolve,reject)=>{const tx=db.transaction(DB_STORE,"readonly"),r=tx.objectStore(DB_STORE).get(SNAPSHOT_KEY);r.onsuccess=()=>resolve(r.result||null);r.onerror=()=>reject(r.error)}); db.close();
+    if(!snap){toast("Belum ada cache perubahan");return;}
+    if(snap.fileName!==state.fileName || snap.byteLength!==state.original.byteLength){toast(`Cache untuk ${snap.fileName} (${snap.byteLength} byte), bukan file yang sedang dibuka.`);return;}
+    if(!confirm(`Pulihkan cache perubahan terakhir dari ${new Date(snap.savedAt).toLocaleString("id-ID")}? Perubahan yang sedang ada akan digantikan cache tersebut.`))return;
+    state.dirty=new Map(snap.dirty||[]); state.outsideEdits=new Map(snap.outsideEdits||[]); invalidateDeltaCache();
+    if(state.selected>=0)selectRecord(state.selected); renderResults(); updateHeaderPreview(); $("saveBtn").disabled=!(state.dirty.size||state.outsideEdits.size);
+    toast(`Cache dipulihkan: ${state.dirty.size} string, ${state.outsideEdits.size} edit teks non-string.`);
+  } catch(e){console.error(e);toast("Gagal memulihkan cache perubahan");}
+}
+async function loadReferenceFile(file) {
+  const status=$("referenceStatus"); status.textContent="Membaca dan mengindeks LTC referensi…";
+  try {
+    const buf=await file.arrayBuffer(); const parsed=await buildIndexAsync(buf, (pct,count)=>{status.textContent=`Mengindeks referensi ${pct}% · ${count.toLocaleString("id-ID")} string…`;});
+    if(parsed.markers.length<2) throw new Error("Struktur LTC referensi tidak dikenali.");
+    const bytes=new Uint8Array(buf), map=new Map();
+    for(let i=0;i<parsed.ids.length;i++) map.set(String(parsed.ids[i]),dec.decode(bytes.subarray(parsed.textOffsets[i],parsed.textOffsets[i]+parsed.lengths[i])));
+    referenceLTC={name:file.name,map};
+    status.textContent=`Referensi: ${file.name} · ${map.size.toLocaleString("id-ID")} string. Pilih string di editor untuk membandingkan ID yang sama.`;
+    if(state.selected>=0) showReferenceForSelected();
+    $("scanDeviationsBtn").disabled=false; scanDeviations();
+  } catch(e){referenceLTC=null;status.textContent=`Gagal membaca referensi: ${e.message}`;toast("File referensi tidak cocok");}
+}
+function showReferenceForSelected(){
+  const out=$("referenceText"),btn=$("useReferenceBtn");
+  if(!referenceLTC||state.selected<0){out.value="";btn.disabled=true;return;}
+  const id=String(idFor(state.selected)), value=referenceLTC.map.get(id);
+  out.value=value??"ID ini tidak ditemukan dalam file referensi."; btn.disabled=value===undefined;
+  if(value!==undefined) $("referenceStatus").textContent=`${referenceLTC.name} · ID ${id} cocok.`;
+}
+
+function currentDeviationText(i){ return state.dirty.has(i)?state.dirty.get(i):decodeAt(i); }
+function deviationReasons(source, target){
+  const reasons=[]; const issues=qualityIssues(source,target);
+  if(issues.includes("placeholder")) reasons.push("placeholder");
+  if(issues.includes("unchanged") || issues.includes("english")) reasons.push("english");
+  if(issues.some(x=>["glossary","duplicate","too-short","encoding","empty"].includes(x))) reasons.push("suspect");
+  // Catch frequent football-context mistranslations that glossary cleanup may miss.
+  if(/\bmatch\b/i.test(source) && /\bcocok\b/i.test(target)) reasons.push("suspect");
+  if(/\bappointment\b/i.test(source) && /\bjanji\b/i.test(target)) reasons.push("suspect");
+  return [...new Set(reasons)];
+}
+function scanDeviations(){
+  if(!referenceLTC || !state.original){toast("Muat file LTC utama dan LTC referensi Inggris terlebih dahulu.");return;}
+  const mode=$("deviationFilter").value; const rows=[];
+  for(let i=0;i<state.markers.length;i++){
+    const src=referenceLTC.map.get(String(state.indexIds[i])); if(src===undefined) continue;
+    const target=currentDeviationText(i); if(target===src) { if(mode==="all"||mode==="untranslated") rows.push({i,src,target,reasons:["english"]}); continue; }
+    const reasons=deviationReasons(src,target);
+    const include=mode==="all" ? true : mode==="placeholder" ? reasons.includes("placeholder") : mode==="untranslated" ? reasons.includes("english") : reasons.includes("suspect")||reasons.includes("placeholder")||reasons.includes("english");
+    if(include) rows.push({i,src,target,reasons});
+  }
+  deviationRows=rows; deviationPage=0; renderDeviationPage();
+}
+function renderDeviationPage(){
+  const box=$("deviationResults"); if(!box)return; box.replaceChildren();
+  const size=Math.max(1,Number($("deviationPageSize").value)||20), pages=Math.ceil(deviationRows.length/size), start=deviationPage*size;
+  for(const row of deviationRows.slice(start,start+size)){
+    const card=document.createElement("article"); card.className="deviation-item";
+    const title=document.createElement("div"); title.className="deviation-title"; title.textContent=`ID ${state.indexIds[row.i]} · string ${row.i+1} · ${row.reasons.join(", ")||"perlu ditinjau"}`;
+    const source=document.createElement("div"); source.className="deviation-source"; source.textContent="EN: "+row.src;
+    const target=document.createElement("div"); target.className="deviation-target"; target.textContent="ID: "+row.target;
+    const actions=document.createElement("div"); actions.className="deviation-actions";
+    const edit=document.createElement("button"); edit.textContent="Buka editor"; edit.addEventListener("click",()=>{state.selected=row.i; const pos=state.searchMode?state.lastResults.indexOf(row.i):row.i; if(state.searchMode&&pos>=0)state.page=Math.floor(pos/state.pageSize); else if(!state.searchMode)state.page=Math.floor(row.i/state.pageSize);renderResults();selectRecord(row.i);});
+    const google=document.createElement("button"); google.textContent="Terjemahkan ulang Google"; google.addEventListener("click",async()=>{google.disabled=true;try{const out=await translateTextOnlineKeepingPlaceholders(row.src); if(!isValidGoogleResult(row.src,out))throw new Error("Hasil Google masih gagal validasi placeholder/teks."); state.dirty.set(row.i,out); scheduleChangeSnapshot(); invalidateDeltaCache(); renderResults(); row.target=out; target.textContent="ID: "+out; toast("Terjemahan Google diterapkan ke string ini.");}catch(e){toast("Google gagal: "+e.message);}finally{google.disabled=false;}});
+    actions.append(edit,google); card.append(title,source,target,actions); box.append(card);
+  }
+  $("deviationPageInfo").textContent=`Halaman ${pages?deviationPage+1:0} / ${pages} · ${deviationRows.length.toLocaleString("id-ID")} kandidat`;
+  $("deviationPrevBtn").disabled=deviationPage<=0; $("deviationNextBtn").disabled=deviationPage>=pages-1;
+  $("translateDeviationPageBtn").disabled=!deviationRows.length;
+  $("deviationStatus").textContent=referenceLTC?`Referensi ${referenceLTC.name} · ${deviationRows.length.toLocaleString("id-ID")} kandidat pada filter ini.`:"Muat file referensi Inggris terlebih dahulu.";
+}
+async function translateDeviationPage(){
+  const size=Math.max(1,Number($("deviationPageSize").value)||20), rows=deviationRows.slice(deviationPage*size,(deviationPage+1)*size);
+  if(!rows.length)return;
+  if(!confirm(`Terjemahkan ulang ${rows.length} string pada halaman audit ini menggunakan Google?`))return;
+  const btn=$("translateDeviationPageBtn"); btn.disabled=true; let ok=0,fail=0;
+  try{for(let n=0;n<rows.length;n++){
+    const row=rows[n]; try{const out=await translateTextOnlineKeepingPlaceholders(row.src); if(!isValidGoogleResult(row.src,out))throw new Error("validasi"); state.dirty.set(row.i,out); row.target=out; ok++;}catch(e){fail++;}
+    $("deviationStatus").textContent=`Google halaman audit: ${n+1}/${rows.length} · berhasil ${ok} · gagal ${fail}`; scheduleChangeSnapshot();
+  }}finally{invalidateDeltaCache();renderResults();renderDeviationPage();btn.disabled=false;toast(`Selesai: ${ok} berhasil, ${fail} gagal. String gagal tidak diubah.`);}
+}
+
 const enc = new TextEncoder();
 
 // Keep a local copy so an Android/Chrome reload or renderer recovery does not leave
@@ -347,6 +451,7 @@ function selectRecord(index) {
   document.querySelectorAll(".result.active").forEach(x => x.classList.remove("active"));
   const active = document.querySelector(`.result[data-index="${index}"]`);
   if (active) { active.classList.add("active"); active.scrollIntoView({ block: "nearest" }); }
+  showReferenceForSelected();
 }
 
 function updateSelectedMetaAfterShift() {
@@ -393,6 +498,7 @@ function applyCurrent() {
   // Re-render only the current page. This updates every later offset visible on the page
   // without creating DOM nodes for other pages.
   refreshPageOffsets();
+  scheduleChangeSnapshot();
   toast(state.dirty.has(i) ? "Perubahan diterapkan · posisi string setelahnya ikut bergeser" : "Kembali ke teks asli");
 }
 
@@ -1129,6 +1235,7 @@ async function startTranslation() {
         const item=batch[j], out=(outputs[j]||item.text).trim();
         if($("translateUseCache")?.checked!==false) await putTranslationCache(item.key,out);
         for(const idx of item.indices) state.dirty.set(idx,out);
+        if(state.translationDone % 10 === 0) scheduleChangeSnapshot();
       }
       cursor+=batch.length; state.translationDone=cursor;
       const pct=Math.floor(cursor/plan.queue.length*100);
@@ -1205,6 +1312,7 @@ function applyOutsideTextEdits(){
     if(value!==run.text) edits.set(offset,value);
   }
   state.outsideEdits=edits;
+  scheduleChangeSnapshot();
   $("headerInfo").textContent=`Perubahan teks non-string disiapkan: ${edits.size} bagian. Perubahan akan diterapkan saat menyimpan LTC.`;
   toast("Perubahan teks di luar string disiapkan");
 }
@@ -1246,6 +1354,7 @@ async function runBulkTransform(label, transform, confirmText) {
       }
     }
     invalidateDeltaCache();
+    scheduleChangeSnapshot();
     if (state.selected>=0) selectRecord(state.selected);
     renderResults();
     progress.textContent=`Selesai: ${label} · ${changed.toLocaleString("id-ID")} string diubah dari ${checked.toLocaleString("id-ID")}.`;
@@ -1294,6 +1403,7 @@ async function loadFile(file, fromCache=false) {
       // Always show the first sequential page immediately after indexing.
       state.searchMode=false; state.lastResults=[]; state.page=0; renderResults();
       updateTranslationUI();
+      try { const db=await openDB(); const snap=await new Promise((res,rej)=>{const tx=db.transaction(DB_STORE,"readonly"),r=tx.objectStore(DB_STORE).get(SNAPSHOT_KEY);r.onsuccess=()=>res(r.result||null);r.onerror=()=>rej(r.error)}); db.close(); $("restoreChangesBtn").disabled=!(snap && snap.fileName===state.fileName && snap.byteLength===state.original.byteLength); } catch(e){}
       toast(fromCache ? `LTC dipulihkan · ${state.markers.length.toLocaleString("id-ID")} string` : `LTC siap · ${state.markers.length.toLocaleString("id-ID")} string`);
     } catch(e) {
       console.error(e); state.indexing=false; $("progressWrap").classList.add("hidden");
@@ -1341,6 +1451,15 @@ $("translateStartBtn").addEventListener("click", startTranslation);
 $("translatePauseBtn").addEventListener("click", pauseTranslation);
 $("translateClearCacheBtn").addEventListener("click", async()=>{ if(confirm("Hapus semua cache terjemahan yang tersimpan di browser?")){await clearTranslationCache(); toast("Cache terjemahan dihapus");} });
 $("fileInput").addEventListener("change", e => { const f=e.target.files?.[0]; if(f) loadFile(f); });
+$("restoreChangesBtn")?.addEventListener("click", restoreChangeSnapshot);
+$("referenceFileInput")?.addEventListener("change", e=>{const f=e.target.files?.[0];if(f)loadReferenceFile(f);});
+$("useReferenceBtn")?.addEventListener("click",()=>{if(state.selected<0||!referenceLTC)return;const value=referenceLTC.map.get(String(idFor(state.selected)));if(value===undefined)return;$("editorText").value=value;updateCharInfo();updateWarning();toast("Teks referensi disalin ke editor; tekan Terapkan perubahan untuk menyimpan.");});
+$("scanDeviationsBtn")?.addEventListener("click",scanDeviations);
+$("deviationFilter")?.addEventListener("change",scanDeviations);
+$("deviationPageSize")?.addEventListener("change",()=>{deviationPage=0;renderDeviationPage();});
+$("deviationPrevBtn")?.addEventListener("click",()=>{deviationPage=Math.max(0,deviationPage-1);renderDeviationPage();});
+$("deviationNextBtn")?.addEventListener("click",()=>{const pages=Math.ceil(deviationRows.length/(Number($("deviationPageSize").value)||20));deviationPage=Math.min(pages-1,deviationPage+1);renderDeviationPage();});
+$("translateDeviationPageBtn")?.addEventListener("click",translateDeviationPage);
 let searchTimer;
 $("searchInput").addEventListener("input", e => { state.filter=e.target.value; clearTimeout(searchTimer); searchTimer=setTimeout(searchMatches,280); });
 $("caseSensitive").addEventListener("change", e => { state.caseSensitive=e.target.checked; searchMatches(); });

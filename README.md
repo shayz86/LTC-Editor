@@ -1,19 +1,17 @@
-# LTC Editor Football Manager 2021 — Mobile v30
+# LTC Editor Football Manager 2021 Mobile V32
 
-Browser editor for Football Manager 2021 `.ltc` language files.
+Browser-based LTC editor with Google Translate experimental support, local change snapshots, LTC reference comparison, and a paginated audit panel for suspected translation deviations.
 
-## Google-first recovery
-- Google Translate experimental/unofficial remains the primary translator.
-- MarianMT fallback remains OFF by default and is optional.
-- When Google alters placeholder masks, the app retries with alternate mask token patterns. If that still fails, it translates text segments around placeholders separately, so original LTC placeholders are never sent to Google in that recovery strategy.
-- Existing network retry/backoff and alternate Google endpoints remain enabled.
-- Long text is split while preserving paragraph/newline separators.
-- If all Google recovery strategies fail, the original string is preserved and the queue continues; failure counts and last error are shown. It does not silently replace the result with MarianMT.
-- Google endpoints are unofficial and may rate-limit or become unavailable; no retry strategy can guarantee service availability.
+## Audit against English LTC
+1. Open the translated LTC file.
+2. Load the English LTC using **Muat LTC referensi**.
+3. Open **Audit terjemahan menyimpang** and press **Pindai perbandingan**.
+4. Choose a filter and page size (10/20/50/100).
+5. Use **Terjemahkan halaman ini dengan Google** to retranslate only the current audit page based on English source strings and apply results to matching IDs.
 
-## Existing capabilities
-- LTC index and save/rebuild engine retained from earlier versions.
-- Search, pagination, bulk tools, non-string text panel, pronoun placeholder handling, and paragraph-preserving translation features retained from v29.
+The audit is heuristic. It flags likely issues such as changed/missing placeholders, untranslated English, suspicious glossary artifacts, repeated words, and known context patterns. It cannot reliably judge every semantic translation error, so review results before saving. Google endpoints are unofficial and may be rate-limited. Failed strings are left unchanged.
 
-## Recommended use
-Start with a small test batch. Keep the original `.ltc` as backup. Review failure count and validate the result in Football Manager 2021.
+## Notes
+- Reference matching uses LTC string IDs.
+- The V11 LTC save/rebuild engine is retained.
+- Test the saved file in Football Manager 2021 before relying on it.

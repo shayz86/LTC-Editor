@@ -27,6 +27,7 @@
       </label>
       <button id="saveBtn" disabled>💾 Simpan / Download</button>
       <button id="revertBtn" disabled>↩ Batalkan perubahan</button>
+      <button id="restoreChangesBtn" disabled>⏪ Pulihkan cache perubahan</button>
     </div>
     <div id="fileInfo" class="fileinfo">Belum ada file. Semua pemrosesan dilakukan lokal di browser.</div>
     <div id="progressWrap" class="progress-wrap hidden"><div class="progress-track"><div id="progressBar" class="progress-bar"></div></div><div id="progressText" class="progress-text">Menganalisis file…</div></div>
@@ -205,6 +206,35 @@
       </div>
     </aside>
 
+    <section class="card reference-card">
+      <strong>🧩 Bandingkan dengan LTC referensi</strong>
+      <p class="muted small">Muat file LTC lain (misalnya file bahasa Inggris). Editor mencocokkan ID string yang sama dan menampilkan teks referensi untuk membantu memperbaiki terjemahan yang menyimpang.</p>
+      <label class="filebtn"><input id="referenceFileInput" type="file" accept=".ltc,application/octet-stream"> 📂 Muat LTC referensi</label>
+      <div id="referenceStatus" class="muted small">Belum ada file referensi.</div>
+      <div class="reference-grid"><label>Teks referensi (berdasarkan ID)<textarea id="referenceText" rows="4" readonly placeholder="Pilih string setelah memuat LTC referensi…"></textarea></label></div>
+      <button id="useReferenceBtn" disabled>Salin teks referensi ke editor</button>
+      <p class="muted small">Catatan: bila file referensi berbahasa Inggris, tombol salin hanya untuk menyalin sumber sebagai bahan revisi; bukan menerjemahkan otomatis.</p>
+    </section>
+    <section class="card deviation-card">
+      <strong>🔎 Audit terjemahan menyimpang</strong>
+      <p class="muted small">Muat LTC bahasa Inggris sebagai referensi. Daftar ini menyorot kandidat terjemahan yang perlu diperiksa berdasarkan placeholder rusak, teks Inggris tersisa, istilah mencurigakan, duplikasi, atau string belum diterjemahkan. Ini pemeriksaan heuristik, bukan penilaian semantik sempurna.</p>
+      <div class="settings-row">
+        <label>Filter kandidat
+          <select id="deviationFilter"><option value="all">Semua kandidat berbeda</option><option value="suspect" selected>Diduga menyimpang</option><option value="untranslated">Belum diterjemahkan / masih Inggris</option><option value="placeholder">Placeholder bermasalah</option></select>
+        </label>
+        <label>Per halaman
+          <select id="deviationPageSize"><option>10</option><option selected>20</option><option>50</option><option>100</option></select>
+        </label>
+      </div>
+      <div class="settings-row">
+        <button id="scanDeviationsBtn" disabled>🔍 Pindai perbandingan</button>
+        <button id="translateDeviationPageBtn" disabled>🌐 Terjemahkan halaman ini dengan Google</button>
+      </div>
+      <div id="deviationStatus" class="muted small">Muat file LTC referensi bahasa Inggris dan file terjemahan untuk memulai.</div>
+      <div class="pagebar"><button id="deviationPrevBtn" disabled>← Sebelumnya</button><span id="deviationPageInfo">Halaman 0 / 0</span><button id="deviationNextBtn" disabled>Berikutnya →</button></div>
+      <div id="deviationResults" class="deviation-results"></div>
+    </section>
+
     <section class="editor card">
       <div class="editor-head">
         <div>
@@ -233,6 +263,6 @@
 </main>
 
 <div id="toast" class="toast"></div>
-<script type="module" src="app.js?v=27"></script>
+<script type="module" src="app.js?v=31"></script>
 </body>
 </html>
