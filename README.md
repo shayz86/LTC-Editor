@@ -18,3 +18,13 @@ The audit is heuristic. It flags likely issues such as changed/missing placehold
 
 
 V33: Menambahkan filter utama untuk string yang diduga belum diterjemahkan. Panel perbandingan LTC dan audit kini berada dalam dropdown agar tidak mengganggu saat tidak digunakan. Navigasi pagination utama tersedia di atas dan bawah, termasuk lompat ke halaman tertentu. Deteksi string belum diterjemahkan menggunakan perbandingan LTC referensi jika tersedia, atau heuristik sederhana jika tidak.
+
+
+## V34 — Penggantian massal berdasarkan posisi
+
+Menu **Alat massal untuk semua string** kini memiliki pilihan posisi penggantian:
+- **Di mana saja**: mengganti semua kemunculan kata/frasa utuh di dalam string (perilaku sebelumnya).
+- **Hanya awal string**: mengganti kata/frasa utuh yang dimulai di awal string; spasi awal dipertahankan.
+- **Hanya akhir string**: mengganti kata/frasa utuh yang berada di akhir string; spasi dan tanda baca akhir dipertahankan.
+
+Pencocokan tidak membedakan huruf besar/kecil, tetapi teks pengganti digunakan persis seperti yang diketik. Contoh: `Loan player` → `Pemain pinjaman` pada posisi awal tidak akan mengubah `loan player` yang berada di tengah kalimat.

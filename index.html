@@ -13,7 +13,7 @@
 <header class="topbar">
   <div>
     <div class="brand">LTC Editor</div>
-    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v29 — Google-only mode · Full File Full File & Bulk Tools Bulk Tools</div>
+    <div class="subtitle">Football Manager 2021 · Browser Edition · Mobile v34 · Google-first · Bulk replacement position controls</div>
   </div>
   <button id="themeBtn" class="iconbtn" title="Ganti tema">☼</button>
 </header>
@@ -165,7 +165,14 @@
           <label>Menjadi
             <input id="bulkReplaceText" type="text" placeholder="Contoh: pertandingan">
           </label>
-          <button id="bulkReplaceBtn" disabled>Ganti semua (kata utuh)</button>
+          <label>Posisi penggantian
+            <select id="bulkReplaceScope">
+              <option value="any">Di mana saja (semua kemunculan)</option>
+              <option value="start">Hanya awal string</option>
+              <option value="end">Hanya akhir string</option>
+            </select>
+          </label>
+          <button id="bulkReplaceBtn" disabled>Ganti semua sesuai posisi</button>
           <button id="bulkPronounsBtn" disabled>Ubah placeholder kata ganti → Indonesia</button>
         </div>
         <div id="bulkProgress" class="muted small">Perubahan massal akan diterapkan ke seluruh string dan dapat dibatalkan dengan tombol Batalkan perubahan.</div>

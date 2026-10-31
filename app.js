@@ -1388,12 +1388,24 @@ function setupBulkTools() {
   });
   $("bulkReplaceBtn").addEventListener("click",()=>{
     const find=$("bulkFindText").value, replace=$("bulkReplaceText").value;
+    const scope=$("bulkReplaceScope")?.value || "any";
     if(!find){toast("Masukkan kata/frasa yang ingin diganti");return;}
     const escaped=find.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
     let regex;
-    try { regex=new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`,"giu"); }
-    catch { regex=new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`,"gi"); }
-    runBulkTransform(`Ganti kata “${find}”`,text=>text.replace(regex,`$1${replace}`),`Ganti kata/frasa utuh “${find}” menjadi “${replace}” di seluruh string LTC? Kemunculan sebagai bagian dari kata lain tidak akan diganti.`);
+    // Keep word boundaries so "match" does not alter "matches" or "matchday".
+    // Leading/trailing whitespace is preserved, and replacement casing is exactly as entered.
+    try {
+      if(scope==="start") regex=new RegExp(`^(\\s*)(${escaped})(?=$|[^\\p{L}\\p{N}_])`,"iu");
+      else if(scope==="end") regex=new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})([\\s.,;:!?…]*)$`,"iu");
+      else regex=new RegExp(`(^|[^\\p{L}\\p{N}_])(${escaped})(?=$|[^\\p{L}\\p{N}_])`,"giu");
+    } catch {
+      if(scope==="start") regex=new RegExp(`^(\\s*)(${escaped})(?=$|[^A-Za-z0-9_])`,"i");
+      else if(scope==="end") regex=new RegExp(`(^|[^A-Za-z0-9_])(${escaped})([\\s.,;:!?…]*)$`,"i");
+      else regex=new RegExp(`(^|[^A-Za-z0-9_])(${escaped})(?=$|[^A-Za-z0-9_])`,"gi");
+    }
+    const transform=text=>text.replace(regex,(_m,before,matched,after)=> scope==="end" ? `${before}${replace}${after||""}` : `${before||""}${replace}`);
+    const scopeLabel=scope==="start"?"di awal string":scope==="end"?"di akhir string":"di semua posisi";
+    runBulkTransform(`Ganti “${find}” ${scopeLabel}`,transform,`Ganti kata/frasa utuh “${find}” menjadi “${replace}” ${scopeLabel} pada seluruh string LTC? Kapitalisasi hasil mengikuti teks pengganti yang kamu masukkan. Bagian kata lain seperti “matches” atau “matchday” tidak ikut berubah.`);
   });
   $("bulkPronounsBtn").addEventListener("click",()=>{
     runBulkTransform("Ubah placeholder kata ganti",convertPronounPlaceholders,"Ubah semua placeholder yang berakhiran kata ganti orang (I/me/my/you/your/he/him/his/she/her/we/they dan lainnya) menjadi kata Indonesia, lalu hapus token placeholder tersebut di seluruh string? Pastikan ini memang yang kamu inginkan karena placeholder tersebut tidak dapat dipulihkan otomatis.");
